@@ -1,0 +1,77 @@
+{
+  "chapter_id": "math_5_calculus_rational_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "5",
+  "topic": "חשבון דיפרנציאלי ואינטגרלי",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 4 יח\"ל",
+  "display_title": "מתמטיקה 5 יח\"ל — חשבון דיפרנציאלי ואינטגרלי",
+  "source": {
+    "type": "function",
+    "tex": "f(x)=\\dfrac{3x}{x^{2}+1}",
+    "note": "הפונקציה מוגדרת לכל \\(x\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נגזרת הפונקציה היא:",
+      "options": [
+        { "id": "a", "tex": "f'(x)=\\dfrac{3(1-x^{2})}{(x^{2}+1)^{2}}", "correct": true },
+        { "id": "b", "tex": "f'(x)=\\dfrac{3(x^{2}+1)}{(x^{2}+1)^{2}}", "correct": false },
+        { "id": "c", "tex": "f'(x)=\\dfrac{3}{2x}", "correct": false },
+        { "id": "d", "tex": "f'(x)=\\dfrac{3(x^{2}-1)}{(x^{2}+1)^{2}}", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד יודע לגזור מכפלה אך מתבלבל בכלל המנה. הסבר לו במילים, שלב אחר שלב כאילו אתה אומר זאת בקול, כיצד גוזרים את הפונקציה \\(f(x)=\\dfrac{3x}{x^{2}+1}\\) בעזרת כלל המנה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נקודות הקיצון ותחומי העלייה של הפונקציה הם:",
+      "options": [
+        { "id": "a", "text": "מקסימום ב-\\(\\left(1,\\tfrac{3}{2}\\right)\\), מינימום ב-\\(\\left(-1,-\\tfrac{3}{2}\\right)\\), עולה בתחום \\(-1<x<1\\).", "correct": true },
+        { "id": "b", "text": "מינימום ב-\\(\\left(1,\\tfrac{3}{2}\\right)\\), מקסימום ב-\\(\\left(-1,-\\tfrac{3}{2}\\right)\\), עולה בתחום \\(x>1\\).", "correct": false },
+        { "id": "c", "text": "אין נקודות קיצון, הפונקציה עולה בכל תחום ההגדרה.", "correct": false },
+        { "id": "d", "text": "מקסימום ב-\\((0,0)\\), עולה בתחום \\(x<0\\).", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טוען שהפונקציה עולה בכל מקום \"כי המונה \\(3x\\) עולה\". זהה את הטעות והסבר במילים כיצד סימן הנגזרת קובע עלייה או ירידה, ומה קורה משני צידי \\(x=1\\).",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "השטח הכלוא בין הגרף לציר ה-\\(x\\) בתחום \\(0\\le x\\le\\sqrt{3}\\) הוא (רמז: \\(\\int\\dfrac{3x}{x^{2}+1}\\,dx=\\tfrac{3}{2}\\ln(x^{2}+1)+C\\)):",
+      "options": [
+        { "id": "a", "tex": "\\tfrac{3}{2}\\ln 4", "correct": true },
+        { "id": "b", "tex": "\\tfrac{3}{2}\\ln 3", "correct": false },
+        { "id": "c", "tex": "3\\ln 4", "correct": false },
+        { "id": "d", "tex": "\\tfrac{3}{2}\\ln 2", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מדוע לחישוב שטח נדרש אינטגרל מסוים ולא רק פונקציה קדומה, ומה מייצג כל אחד משני גבולות האינטגרל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

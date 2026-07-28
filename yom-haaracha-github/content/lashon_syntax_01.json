@@ -1,0 +1,76 @@
+{
+  "chapter_id": "lashon_syntax_01",
+  "subject": "לשון",
+  "archetype": "decode",
+  "level": null,
+  "topic": "תחביר: משפט פשוט, מאוחה ומורכב",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח — כל מונח מוגדר בקטע",
+  "display_title": "לשון — תחביר: משפט פשוט, מאוחה ומורכב",
+  "source": {
+    "type": "text_source",
+    "text": "הנשוא הוא בדרך כלל הפועל של המשפט. משפט פשוט — יש בו נשוא אחד. משפט מאוחה — שני משפטים פשוטים המחוברים זה לזה (בעזרת ו', פסיק, \"אבל\", \"או\"), וכל אחד מהם יכול לעמוד בפני עצמו. משפט מורכב — משפט עיקרי ובתוכו פסוקית הפותחת במילת שעבוד (\"ש...\", \"כאשר\", \"מפני ש...\"), והפסוקית אינה יכולה לעמוד בפני עצמה."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו סוג המשפט: \"דנה סיימה את שיעורי הבית, והיא יצאה לשחק\"?",
+      "options": [
+        { "id": "a", "text": "משפט מאוחה", "correct": true },
+        { "id": "b", "text": "משפט מורכב", "correct": false },
+        { "id": "c", "text": "משפט פשוט", "correct": false },
+        { "id": "d", "text": "פסוקית", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד במילים את ההבדל בין משפט מאוחה למשפט מורכב, ותן לו בדיקה פשוטה להבחנה: האם כל חלק במשפט יכול לעמוד בפני עצמו.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה מן המשפטים הבאים הוא משפט מורכב?",
+      "options": [
+        { "id": "a", "text": "המורה שמלמדת אותנו מתמטיקה נסעה לחו\"ל.", "correct": true },
+        { "id": "b", "text": "דן קרא ספר, ורותי ציירה תמונה.", "correct": false },
+        { "id": "c", "text": "הילדים שיחקו בחצר.", "correct": false },
+        { "id": "d", "text": "אכלנו ושתינו.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שכל משפט שיש בו יותר מפועל אחד הוא בהכרח משפט מורכב. זהה את הטעות ותקן אותה במילים, בעזרת דוגמה.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "במשפט \"לא הלכנו לטיול מפני שהיה חם מאוד\" — מהי מילת השעבוד הפותחת את הפסוקית?",
+      "options": [
+        { "id": "a", "text": "\"מפני ש...\"", "correct": true },
+        { "id": "b", "text": "\"לא\"", "correct": false },
+        { "id": "c", "text": "\"מאוד\"", "correct": false },
+        { "id": "d", "text": "\"הלכנו\"", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים כיצד מילת השעבוד מזהה את הפסוקית ואת גבולותיה, ומדוע הפסוקית אינה יכולה לעמוד בפני עצמה כמשפט.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

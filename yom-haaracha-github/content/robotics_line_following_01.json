@@ -1,0 +1,76 @@
+{
+  "chapter_id": "robotics_line_following_01",
+  "subject": "רובוטיקה",
+  "archetype": "robotics",
+  "level": null,
+  "topic": "מעקב קו וחיישן צבע (FLL)",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · העברת תוכן — בלי חשיבה מורכבת",
+  "display_title": "רובוטיקה (FLL) — מעקב קו וחיישן צבע",
+  "source": {
+    "type": "text_source",
+    "text": "לרובוט יש חיישן צבע שקורא כמה אור מוחזר מהמשטח: משטח לבן מחזיר הרבה אור, ומשטח שחור מחזיר מעט אור. במעקב אחר קו הרובוט נוסע לאורך הגבול שבין הקו השחור למשטח הלבן: כשהחיישן קורא ערך כהה — הרובוט מתקן את כיוון הנסיעה לכיוון אחד, וכשהוא קורא ערך בהיר — הוא מתקן לכיוון השני, בתיקונים קטנים ומתמשכים."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה עושה הרובוט כאשר חיישן הצבע קורא ערך כהה?",
+      "options": [
+        { "id": "a", "text": "מתקן את כיוון הנסיעה כדי לחזור אל גבול הקו.", "correct": true },
+        { "id": "b", "text": "עוצר לגמרי עד שיקבל פקודה חדשה.", "correct": false },
+        { "id": "c", "text": "מגביר את המהירות וממשיך ישר.", "correct": false },
+        { "id": "d", "text": "מסתובב 180 מעלות וחוזר לאחור.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד בן 11 במילים פשוטות כיצד חיישן הצבע עוזר לרובוט \"לדעת\" איפה נמצא הקו, בלי מונחים מסובכים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מדוע הרובוט מבצע תיקונים קטנים ומתמשכים במקום תיקון גדול אחד?",
+      "options": [
+        { "id": "a", "text": "כי המצב משתנה כל הזמן, והרובוט בודק ומתקן שוב ושוב.", "correct": true },
+        { "id": "b", "text": "כי מנוע הרובוט חלש מדי לתיקון גדול.", "correct": false },
+        { "id": "c", "text": "כי אסור לרובוט לזוז מהר לפי חוקי התחרות.", "correct": false },
+        { "id": "d", "text": "כי החיישן פועל רק פעם אחת בכל נסיעה.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שאם מכוונים את הרובוט על הקו בהתחלה, הוא יישאר עליו לבדו גם בלי חיישן. זהה את הטעות והסבר במילים מדוע דרוש חיישן ותיקון מתמשך.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזו פקודה משתמשת בחיישן (במשוב) ולא בזמן \"עיוור\"?",
+      "options": [
+        { "id": "a", "text": "\"סע עד שחיישן הצבע רואה קו שחור.\"", "correct": true },
+        { "id": "b", "text": "\"סע קדימה במשך 3 שניות.\"", "correct": false },
+        { "id": "c", "text": "\"סובב את הגלגלים 5 סיבובים.\"", "correct": false },
+        { "id": "d", "text": "\"סע קדימה חצי מטר.\"", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מהו היתרון של פקודה מבוססת-חיישן על פני פקודה לפי זמן, ומתי כל אחת מהן עלולה להיכשל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

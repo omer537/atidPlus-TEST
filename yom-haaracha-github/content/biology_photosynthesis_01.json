@@ -1,0 +1,76 @@
+{
+  "chapter_id": "biology_photosynthesis_01",
+  "subject": "ביולוגיה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "פוטוסינתזה ונשימה תאית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · ידע מוקדם",
+  "display_title": "ביולוגיה — פוטוסינתזה ונשימה תאית",
+  "source": {
+    "type": "text_source",
+    "text": "בצמח מתרחשים שני תהליכים משלימים: פוטוסינתזה ונשימה תאית. בפוטוסינתזה הצמח קולט פחמן דו-חמצני (\\(\\text{CO}_2\\)) ומים, ובעזרת אור השמש בונה גלוקוז ומשחרר חמצן. בנשימה התאית הצמח מפרק גלוקוז בעזרת חמצן, ומשחרר אנרגיה, פחמן דו-חמצני (\\(\\text{CO}_2\\)) ומים."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהם חומרי המוצא (המקור) של תהליך הפוטוסינתזה?",
+      "options": [
+        { "id": "a", "text": "פחמן דו-חמצני (\\(\\text{CO}_2\\)) ומים, בעזרת אור.", "correct": true },
+        { "id": "b", "text": "גלוקוז וחמצן.", "correct": false },
+        { "id": "c", "text": "חמצן ומים בלבד.", "correct": false },
+        { "id": "d", "text": "גלוקוז ופחמן דו-חמצני.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד במילים מהי \"מטרת\" הפוטוסינתזה עבור הצמח — מה היא מייצרת ומדוע הדבר חיוני לצמח.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו הקשר בין פוטוסינתזה לנשימה תאית?",
+      "options": [
+        { "id": "a", "text": "הם משלימים: פוטוסינתזה בונה גלוקוז ומשחררת חמצן, ונשימה מפרקת גלוקוז בעזרת חמצן ומשחררת אנרגיה ו-\\(\\text{CO}_2\\).", "correct": true },
+        { "id": "b", "text": "הם זהים לחלוטין ומתרחשים באותו אופן.", "correct": false },
+        { "id": "c", "text": "פוטוסינתזה מתרחשת בבעלי חיים ונשימה בצמחים.", "correct": false },
+        { "id": "d", "text": "שניהם מפרקים גלוקוז ומשחררים חמצן.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"צמחים לא נושמים\". זהה את הטעות והסבר במילים שגם צמחים מבצעים נשימה תאית, לצד הפוטוסינתזה.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה מתרחש בצמח בלילה, כשאין אור?",
+      "options": [
+        { "id": "a", "text": "רק נשימה תאית; הצמח צורך חמצן ומשחרר \\(\\text{CO}_2\\).", "correct": true },
+        { "id": "b", "text": "רק פוטוסינתזה; הצמח משחרר חמצן.", "correct": false },
+        { "id": "c", "text": "שני התהליכים נעצרים לחלוטין.", "correct": false },
+        { "id": "d", "text": "הצמח מייצר גלוקוז מהאור של הירח.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מדוע צמח בחדר חשוך ואטום עלול לגרום לירידה בכמות החמצן באוויר, בקישור לנשימה התאית.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

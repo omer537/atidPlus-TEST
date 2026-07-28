@@ -1,0 +1,22 @@
+{
+  "name": "yom-haaracha",
+  "version": "1.0.0",
+  "description": "מערכת יום הערכה למלגאים — 40 נבחנים במקביל, 4 פרקי מבחן + ריאיון ב-5 סבבים",
+  "type": "commonjs",
+  "main": "server.js",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check-content": "node lib/guardrail.js",
+    "grade": "node lib/grade.js",
+    "rehearsal": "node scripts/rehearsal.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "katex": "^0.16.11",
+    "xlsx": "^0.18.5"
+  }
+}

@@ -1,0 +1,19 @@
+# הגדרות פריסה אוטומטית ל-Render.
+# כשמחברים את התיקייה הזו ל-Render ובוחרים "Blueprint", האתר מגדיר הכול לבד.
+services:
+  - type: web
+    name: yom-haaracha
+    runtime: node
+    plan: starter            # מכונה קטנה שדולקת תמיד (לא "free" — הוא נכבה מעצמו)
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: EXAMINER_PASSWORD
+        sync: false           # תגדיר/י סיסמת בוחן משלך בלוח הבקרה של Render
+      - key: DB_PATH
+        value: /var/data/assessment.db
+    disk:
+      name: data              # דיסק קבוע — כדי שהנתונים ישרדו הפעלה מחדש
+      mountPath: /var/data
+      sizeGB: 1

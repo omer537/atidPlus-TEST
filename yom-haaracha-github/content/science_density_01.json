@@ -1,0 +1,76 @@
+{
+  "chapter_id": "science_density_01",
+  "subject": "מדעים לחטיבה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "צפיפות וציפה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח · קו שבר אמיתי לצפיפות",
+  "display_title": "מדעים לחטיבת ביניים — צפיפות וציפה",
+  "source": {
+    "type": "text_source",
+    "text": "מסה = כמות החומר בגוף. נפח = כמה מקום הגוף תופס. צפיפות = מסה חלקי נפח, כלומר צפיפות שווה ל-[[frac:מסה|נפח]]. חומר צף אם צפיפותו קטנה מצפיפות הנוזל, ושוקע אם צפיפותו גדולה מצפיפות הנוזל."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "שני גופים A ו-B בעלי אותו נפח, אך המסה של A גדולה מהמסה של B. מה נכון?",
+      "options": [
+        { "id": "a", "text": "לגוף A צפיפות גדולה יותר.", "correct": true },
+        { "id": "b", "text": "לגוף B צפיפות גדולה יותר.", "correct": false },
+        { "id": "c", "text": "לשני הגופים אותה צפיפות.", "correct": false },
+        { "id": "d", "text": "אי אפשר לדעת בלי לדעת את הצבע.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לכיתה ז' במילים מהי צפיפות, בעזרת דוגמה מחיי היום-יום, בלי לכתוב נוסחה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "חומר שצפיפותו 0.7 גרם לסמ\"ק מונח במים (שצפיפותם 1 גרם לסמ\"ק). מה יקרה?",
+      "options": [
+        { "id": "a", "text": "יצוף.", "correct": true },
+        { "id": "b", "text": "ישקע.", "correct": false },
+        { "id": "c", "text": "יישאר תלוי באמצע.", "correct": false },
+        { "id": "d", "text": "יתמוסס במים.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שספינה כבדה חייבת לשקוע ורק דברים קלים צפים. זהה את הטעות והסבר במילים שהציפה תלויה בצפיפות ולא במשקל הכולל.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "לוקחים שני גופים מאותו חומר בדיוק — אחד גדול ואחד קטן. מה נכון לגבי הצפיפות שלהם?",
+      "options": [
+        { "id": "a", "text": "לשניהם אותה צפיפות.", "correct": true },
+        { "id": "b", "text": "לגוף הגדול צפיפות גדולה יותר.", "correct": false },
+        { "id": "c", "text": "לגוף הקטן צפיפות גדולה יותר.", "correct": false },
+        { "id": "d", "text": "הצפיפות תלויה רק בגודל הגוף.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מדוע חיתוך של חומר לשני חלקים אינו משנה את הצפיפות שלו — כלומר מדוע המסה והנפח קטנים באותה מידה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}
