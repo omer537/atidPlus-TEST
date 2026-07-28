@@ -65,6 +65,33 @@ function setConfig(key, value) {
     .run(key, String(value));
 }
 
+// קיבולת מראיינים פר-סבב (כמה נבחנים יכולים להתראיין בכל סבב). ברירת מחדל 8 בכל סבב.
+function getInterviewCaps() {
+  const raw = getConfig('interview_caps');
+  if (raw) {
+    try {
+      const a = JSON.parse(raw);
+      if (Array.isArray(a) && a.length === schedule.NUM_ROUNDS) return a.map((n) => Math.max(0, Number(n) || 0));
+    } catch (e) {}
+  }
+  return new Array(schedule.NUM_ROUNDS).fill(8);
+}
+function setInterviewCaps(caps) {
+  const clean = new Array(schedule.NUM_ROUNDS).fill(8).map((d, i) => Math.max(0, Number((caps || [])[i]) || 0));
+  setConfig('interview_caps', JSON.stringify(clean));
+  return clean;
+}
+
+// ספירת נבחנים המשובצים לכל סבב ריאיון
+function interviewCounts() {
+  const counts = {};
+  for (let r = 1; r <= schedule.NUM_ROUNDS; r++) counts[r] = 0;
+  for (const row of db.prepare('SELECT interview_round AS r, COUNT(*) AS c FROM examinees WHERE interview_round IS NOT NULL GROUP BY interview_round').all()) {
+    if (row.r) counts[row.r] = row.c;
+  }
+  return counts;
+}
+
 // בונה מחדש את 5 המשבצות של נבחן לפי המקצועות וסבב הריאיון (מוחק קודמות; התשובות נשמרות לפי פרק)
 function buildSlotsFor(code, subjects, mathLevel, interviewRound, seatIndex) {
   db.prepare('DELETE FROM slots WHERE code = ?').run(code);
@@ -74,14 +101,9 @@ function buildSlotsFor(code, subjects, mathLevel, interviewRound, seatIndex) {
   for (const s of plan) insSlot.run(code, s.round, s.kind, s.subject, s.level, s.chapter_id, s.variant_index, SLOT_DURATION_SEC);
 }
 
-// בוחר את סבב הריאיון המאוזן ביותר לפי הקיים
+// בוחר את סבב הריאיון המאוזן ביותר לפי הקיים והקיבולת פר-סבב
 function nextInterviewRound() {
-  const counts = {};
-  for (let r = 1; r <= schedule.NUM_ROUNDS; r++) counts[r] = 0;
-  for (const row of db.prepare('SELECT interview_round AS r, COUNT(*) AS c FROM examinees WHERE interview_round IS NOT NULL GROUP BY interview_round').all()) {
-    if (row.r) counts[row.r] = row.c;
-  }
-  return schedule.pickInterviewRound(counts);
+  return schedule.pickInterviewRound(interviewCounts(), getInterviewCaps());
 }
 
 function seatIndexFor() {
@@ -425,26 +447,29 @@ app.post('/api/examiner/add-examinee', authExaminer, (req, res) => {
   res.json({ ok: true, code: cleanCode, needs_setup: chosen.length === 0 });
 });
 
-// פתיחת משתמשים מרשימה (שם, קוד בכל שורה). הנבחנים ישלימו מקצועות בכניסה.
+// פתיחת משתמשים מרשימה. פורמט כל שורה: "שם, קוד" או "שם, קוד, סבב-ריאיון" (סבב אופציונלי 1..5).
+// בלי סבב — נשאר לא-משובץ, כדי שהמנהל ישבץ לפי שם בפאנל התכנון.
 app.post('/api/examiner/add-examinees-bulk', authExaminer, (req, res) => {
   const text = String((req.body && req.body.text) || '');
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   let added = 0; const skipped = [];
   for (const line of lines) {
-    const parts = line.split(/[,\t;]/).map((s) => s.trim()).filter(Boolean);
+    const parts = line.split(/[,\t;]/).map((s) => s.trim());
     const name = parts[0], code = parts[1];
+    const roundRaw = parts[2] !== undefined ? Number(parts[2]) : null;
+    const iRound = roundRaw && roundRaw >= 1 && roundRaw <= schedule.NUM_ROUNDS ? roundRaw : null;
     if (!name || !code) { skipped.push(line + ' (חסר שם או קוד)'); continue; }
     if (getExamineeByCode.get(code)) { skipped.push(code + ' (כבר קיים)'); continue; }
     db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registered')`).run(
-      code, name, newToken(), JSON.stringify(null), JSON.stringify([]), null, nextInterviewRound(), now());
+      code, name, newToken(), JSON.stringify(null), JSON.stringify([]), null, iRound, now());
     added++;
   }
   logEvent(null, 'bulk_preregister', `נוספו ${added}`);
   res.json({ ok: true, added, skipped });
 });
 
-// שינוי סבב הריאיון של נבחן (בונה מחדש את הלוח שלו אם כבר בחר מקצועות)
+// שינוי סבב הריאיון של נבחן (בונה מחדש את הלוח שלו אם כבר בחר מקצועות). מחזיר אזהרת חריגה מקיבולת.
 app.post('/api/examiner/set-interview-round', authExaminer, (req, res) => {
   const { code, round } = req.body || {};
   const r = Number(round);
@@ -455,7 +480,39 @@ app.post('/api/examiner/set-interview-round', authExaminer, (req, res) => {
   const subjects = JSON.parse(ex.subjects || '[]');
   if (subjects.length) buildSlotsFor(code, subjects, ex.math_level, r, 0);
   logEvent(code, 'set_interview_round', String(r));
-  res.json({ ok: true });
+  const cap = getInterviewCaps()[r - 1];
+  const count = interviewCounts()[r];
+  res.json({ ok: true, round: r, count, cap, over: count > cap });
+});
+
+// הגדרת קיבולת מראיינים פר-סבב
+app.post('/api/examiner/set-interview-caps', authExaminer, (req, res) => {
+  const caps = setInterviewCaps((req.body && req.body.caps) || []);
+  logEvent(null, 'set_interview_caps', JSON.stringify(caps));
+  res.json({ ok: true, caps });
+});
+
+// איזון אוטומטי של סבבי הריאיון תוך כיבוד הקיבולות (עזר בלבד)
+app.post('/api/examiner/balance-interviews', authExaminer, (req, res) => {
+  const mode = (req.body && req.body.mode) === 'all' ? 'all' : 'unassigned';
+  const caps = getInterviewCaps();
+  const counts = interviewCounts();
+  if (mode === 'all') { for (let r = 1; r <= schedule.NUM_ROUNDS; r++) counts[r] = 0; }
+  // מי צריך שיבוץ: כולם (all) או רק חסרי-סבב (unassigned)
+  const rows = mode === 'all'
+    ? db.prepare('SELECT code, subjects, math_level FROM examinees ORDER BY created_at').all()
+    : db.prepare('SELECT code, subjects, math_level FROM examinees WHERE interview_round IS NULL ORDER BY created_at').all();
+  let assigned = 0;
+  for (const ex of rows) {
+    const r = schedule.pickInterviewRound(counts, caps);
+    counts[r] = (counts[r] || 0) + 1;
+    db.prepare('UPDATE examinees SET interview_round = ? WHERE code = ?').run(r, ex.code);
+    const subjects = JSON.parse(ex.subjects || '[]');
+    if (subjects.length) buildSlotsFor(ex.code, subjects, ex.math_level, r, 0);
+    assigned++;
+  }
+  logEvent(null, 'balance_interviews', `${mode} · ${assigned}`);
+  res.json({ ok: true, assigned, counts });
 });
 
 // הסרת נבחן (שימושי לניקוי נבחני בדיקה)
@@ -506,7 +563,10 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
       flags,
     };
   });
-  res.json({ latest_released: released, total_rounds: schedule.NUM_ROUNDS, examinees: list });
+  res.json({
+    latest_released: released, total_rounds: schedule.NUM_ROUNDS, examinees: list,
+    interview_caps: getInterviewCaps(), interview_counts: interviewCounts(),
+  });
 });
 
 // עקיפות ידניות: הוספת זמן / השהיה / המשך / איפוס משבצת

@@ -85,6 +85,13 @@ window.AdminApp = (function () {
       '<p class="hint-text">"השהה את כולם" עוצר את הטיימר לכל הנבחנים (למשל להפסקה) — "המשך" מחזיר. "סיים את המבחן" סוגר את המבחן לכולם לפני הזמן — להשתמש רק בסוף.</p>' +
       '<p class="hint-text" id="iv-dist"></p>' +
       '</div>' +
+      // תכנון ריאיונות — קיבולת פר-סבב + מי משובץ (לפי שם)
+      '<div class="card"><h2 class="section-title">תכנון ריאיונות</h2>' +
+      '<p class="hint-text">הגדר/י לכל סבב כמה מראיינים יש (קיבולת), וראה/י לפי שם מי משובץ לכל סבב. את השיבוץ קובעים בעמודת "ריאיון בסבב" בטבלת הנבחנים למטה (מראש או בלייב). אם מספר המשובצים עובר את הקיבולת — יופיע סימון אדום.</p>' +
+      '<div class="planner-grid" id="planner-rounds"></div>' +
+      '<div class="btn-row" style="margin-top:12px"><button class="btn small" id="btn-balance">אזן אוטומטית (למי שאין סבב)</button>' +
+      '<button class="btn ghost small" id="btn-balance-all">אזן הכל מחדש</button></div>' +
+      '<p class="hint-text" id="planner-unassigned"></p></div>' +
       // ניהול נבחנים — פתיחת משתמשים מראש
       '<div class="card"><h2 class="section-title">ניהול נבחנים</h2>' +
       '<p class="hint-text">אפשר לפתוח לנבחנים משתמשים מראש. ביום עצמו הם ייכנסו עם השם והקוד שקבעת. אם לא תבחר להם מקצועות — הם יבחרו בעצמם בכניסה (מומלץ). זה גם המקום להוסיף כמה נבחנים כדי לבדוק את המערכת.</p>' +
@@ -100,8 +107,8 @@ window.AdminApp = (function () {
       '</div>' +
       '<div style="flex:1;min-width:280px">' +
       '<b>הוספת רשימה שלמה</b>' +
-      '<p class="hint-text">שורה לכל נבחן, בפורמט: <span style="font-family:var(--mono)">שם, קוד</span></p>' +
-      '<textarea id="bulk-text" placeholder="דנה כהן, 1234&#10;יוסי לוי, 5678&#10;..." style="min-height:150px"></textarea>' +
+      '<p class="hint-text">שורה לכל נבחן: <span style="font-family:var(--mono)">שם, קוד</span> — ואפשר להוסיף סבב ריאיון (אופציונלי): <span style="font-family:var(--mono)">שם, קוד, סבב</span></p>' +
+      '<textarea id="bulk-text" placeholder="דנה כהן, 1234, 2&#10;יוסי לוי, 5678&#10;..." style="min-height:150px"></textarea>' +
       '<button class="btn small" id="add-bulk" style="margin-top:8px">הוסף את הרשימה</button>' +
       '</div>' +
       '</div><div id="add-msg" style="margin-top:12px"></div></div>' +
@@ -129,7 +136,56 @@ window.AdminApp = (function () {
     document.getElementById('add-one').onclick = addOne;
     document.getElementById('add-bulk').onclick = addBulk;
     document.getElementById('btn-backup-now').onclick = backupNow;
+    document.getElementById('btn-balance').onclick = function () { balanceInterviews('unassigned'); };
+    document.getElementById('btn-balance-all').onclick = function () {
+      if (confirm('לאזן מחדש את כל שיבוצי הריאיון? זה יחליף שיבוצים ידניים קיימים.')) balanceInterviews('all');
+    };
     renderAddSubjects();
+  }
+
+  function renderPlanner(data) {
+    var box = document.getElementById('planner-rounds');
+    if (!box) return;
+    // לא לרנדר מחדש בזמן שמקלידים בשדה קיבולת (כדי לא לאבד הקלדה)
+    if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('cap')) return;
+    var caps = data.interview_caps || [];
+    var byRound = {};
+    for (var r = 1; r <= data.total_rounds; r++) byRound[r] = [];
+    data.examinees.forEach(function (ex) { if (ex.interview_round) (byRound[ex.interview_round] = byRound[ex.interview_round] || []).push(ex); });
+    var cards = '';
+    for (var n = 1; n <= data.total_rounds; n++) {
+      var cap = caps[n - 1] !== undefined ? caps[n - 1] : 8;
+      var list = byRound[n] || [];
+      var over = list.length > cap;
+      var names = list.length
+        ? list.map(function (ex) { return '<span class="chip-name" title="קוד ' + esc(ex.code) + '">' + esc(ex.name) + '</span>'; }).join('')
+        : '<span style="color:var(--faint)">— אין —</span>';
+      cards += '<div class="round-plan' + (over ? ' over' : '') + '">' +
+        '<div class="rp-head">סבב ' + n + '</div>' +
+        '<div class="rp-cap">קיבולת: <input type="number" class="cap" data-r="' + n + '" min="0" value="' + cap + '"></div>' +
+        '<div class="rp-count' + (over ? ' over' : '') + '">' + list.length + ' / ' + cap + (over ? '  ⚠ חריגה' : '') + '</div>' +
+        '<div class="rp-names">' + names + '</div></div>';
+    }
+    box.innerHTML = cards;
+    box.querySelectorAll('input.cap').forEach(function (inp) { inp.onchange = saveCaps; });
+    var unassigned = data.examinees.filter(function (ex) { return !ex.interview_round; }).length;
+    var u = document.getElementById('planner-unassigned');
+    if (u) u.innerHTML = unassigned
+      ? '⚠ ' + unassigned + ' נבחנים ללא שיבוץ ריאיון — שבצ/י אותם בטבלה למטה, או לחצ/י "אזן אוטומטית".'
+      : 'כל הנבחנים משובצים לריאיון.';
+  }
+
+  function saveCaps() {
+    var caps = [];
+    document.querySelectorAll('#planner-rounds input.cap').forEach(function (inp) {
+      caps[Number(inp.getAttribute('data-r')) - 1] = Math.max(0, Number(inp.value) || 0);
+    });
+    call('/examiner/set-interview-caps', 'POST', { caps: caps }).then(renderStatus).catch(function (e) { alert(e.message); });
+  }
+
+  async function balanceInterviews(mode) {
+    try { var r = await call('/examiner/balance-interviews', 'POST', { mode: mode }); alert('שובצו ' + r.assigned + ' נבחנים.'); renderStatus(); }
+    catch (e) { alert(e.message); }
   }
 
   function fmtBytes(n) { return n < 1024 ? n + ' ב׳' : (n / 1024).toFixed(1) + ' KB'; }
@@ -309,13 +365,20 @@ window.AdminApp = (function () {
     document.getElementById('summary').innerHTML =
       data.examinees.length + ' נבחנים · סבב אחרון ששוחרר: ' + (data.latest_released || '—') + ' מתוך ' + data.total_rounds;
 
-    // פיזור סבבי הריאיון
+    // פיזור סבבי הריאיון לפי הקיבולות בפועל
+    var caps = data.interview_caps || [];
     var dist = {};
     for (var n = 1; n <= data.total_rounds; n++) dist[n] = 0;
     data.examinees.forEach(function (ex) { if (ex.interview_round) dist[ex.interview_round]++; });
     var distEl = document.getElementById('iv-dist');
-    if (distEl) distEl.innerHTML = 'פיזור ריאיונות (יעד: עד 8 בסבב): ' +
-      Object.keys(dist).map(function (k) { return 'סבב ' + k + ' — ' + dist[k]; }).join(' · ');
+    if (distEl) distEl.innerHTML = 'ריאיונות: ' + Object.keys(dist).map(function (k) {
+      var cap = caps[k - 1] !== undefined ? caps[k - 1] : 8;
+      var over = dist[k] > cap;
+      return 'סבב ' + k + ' <b' + (over ? ' style="color:var(--danger)"' : '') + '>' + dist[k] + '/' + cap + (over ? ' ⚠' : '') + '</b>';
+    }).join(' · ');
+
+    // פאנל תכנון הריאיונות
+    renderPlanner(data);
 
     tb.querySelectorAll('.mini-actions button').forEach(function (b) {
       b.onclick = function () {
@@ -333,7 +396,10 @@ window.AdminApp = (function () {
     tb.querySelectorAll('select.iround').forEach(function (sel) {
       sel.onchange = function () {
         call('/examiner/set-interview-round', 'POST', { code: sel.getAttribute('data-c'), round: Number(sel.value) })
-          .then(renderStatus).catch(function (e) { alert(e.message); });
+          .then(function (r) {
+            if (r && r.over) alert('שים לב: בסבב ' + r.round + ' יש כעת ' + r.count + ' ריאיונות מול קיבולת של ' + r.cap + ' מראיינים. השינוי נשמר, אך יש חריגה.');
+            renderStatus();
+          }).catch(function (e) { alert(e.message); });
       };
     });
   }
