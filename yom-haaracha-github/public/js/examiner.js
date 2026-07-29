@@ -187,13 +187,14 @@ window.AdminApp = (function () {
       '<div class="list-col"><div class="list-head chapter">בפרק (' + solvers.length + ')</div>' + nameChips(solvers, true) + '</div>' +
       '</div>';
 
-    var b;
-    if ((b = document.getElementById('c-start'))) b.onclick = function () { startRound(Number(b.getAttribute('data-r'))); };
-    if ((b = document.getElementById('c-end'))) b.onclick = endRound;
-    if ((b = document.getElementById('c-reset'))) b.onclick = function () { resetRound(Number(b.getAttribute('data-r'))); };
-    if ((b = document.getElementById('c-resetall'))) b.onclick = resetAllCurrent;
-    if ((b = document.getElementById('c-pause'))) b.onclick = function () { pauseAll(true); };
-    if ((b = document.getElementById('c-resume'))) b.onclick = function () { pauseAll(false); };
+    // כל handler קורא את הסבב מהכפתור עצמו (this) — לא ממשתנה משותף
+    var s;
+    if ((s = document.getElementById('c-start'))) s.onclick = function () { startRound(Number(this.getAttribute('data-r'))); };
+    if ((s = document.getElementById('c-end'))) s.onclick = function () { endRound(); };
+    if ((s = document.getElementById('c-reset'))) s.onclick = function () { resetRound(Number(this.getAttribute('data-r'))); };
+    if ((s = document.getElementById('c-resetall'))) s.onclick = function () { resetAllCurrent(); };
+    if ((s = document.getElementById('c-pause'))) s.onclick = function () { pauseAll(true); };
+    if ((s = document.getElementById('c-resume'))) s.onclick = function () { pauseAll(false); };
   }
 
   // ------------------------------------------------- טבלת הנבחנים
