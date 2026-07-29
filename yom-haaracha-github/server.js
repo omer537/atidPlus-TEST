@@ -844,6 +844,13 @@ app.get('/api/examiner/content-health', authExaminer, (req, res) => {
 // ============================================================
 //  קבצים סטטיים
 // ============================================================
+// מונעים מהדפדפן לשמור גרסה ישנה של הקוד (HTML/JS/CSS) — כך עדכון תמיד נכנס לתוקף מיד.
+app.use(function (req, res, next) {
+  if (/\.(html|js|css)$/i.test(req.path) || req.path === '/' || req.path === '/examiner') {
+    res.setHeader('Cache-Control', 'no-store, must-revalidate');
+  }
+  next();
+});
 app.use('/vendor/katex', express.static(path.join(__dirname, 'node_modules', 'katex', 'dist')));
 app.use(express.static(path.join(__dirname, 'public')));
 
