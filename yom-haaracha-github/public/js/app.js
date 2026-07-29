@@ -302,8 +302,9 @@
       waiting: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
       submitted: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
       ended: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
+      finished: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
     };
-    var titles = { interview: 'סבב הריאיון שלך', waiting: 'ממתינים לסבב הבא', submitted: 'הפרק הוגש', ended: 'המבחן הסתיים' };
+    var titles = { interview: 'סבב הריאיון שלך', waiting: 'ממתינים לסבב הבא', submitted: 'הפרק הוגש', ended: 'המבחן הסתיים', finished: 'סיימת — כל הכבוד!' };
     var footer = (kind === 'waiting' || kind === 'submitted')
       ? '<p style="margin-top:18px;color:var(--faint);font-size:14px">המסך יתעדכן אוטומטית כשהבוחן ישחרר את הסבב הבא.</p>' : '';
     root.innerHTML = '';

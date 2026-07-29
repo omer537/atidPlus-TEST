@@ -65,55 +65,51 @@ function setConfig(key, value) {
     .run(key, String(value));
 }
 
-// קיבולת מראיינים פר-סבב (כמה נבחנים יכולים להתראיין בכל סבב). ברירת מחדל 8 בכל סבב.
-function getInterviewCaps() {
-  const raw = getConfig('interview_caps');
-  if (raw) {
-    try {
-      const a = JSON.parse(raw);
-      if (Array.isArray(a) && a.length === schedule.NUM_ROUNDS) return a.map((n) => Math.max(0, Number(n) || 0));
-    } catch (e) {}
-  }
-  return new Array(schedule.NUM_ROUNDS).fill(8);
+// ---------- מצב סבבים (מודל חי) ----------
+function roundState(r) {
+  const row = db.prepare('SELECT state FROM rounds WHERE round = ?').get(r);
+  return row ? row.state : 'planned';
 }
-function setInterviewCaps(caps) {
-  const clean = new Array(schedule.NUM_ROUNDS).fill(8).map((d, i) => Math.max(0, Number((caps || [])[i]) || 0));
-  setConfig('interview_caps', JSON.stringify(clean));
-  return clean;
-}
-
-// ספירת נבחנים המשובצים לכל סבב ריאיון
-function interviewCounts() {
-  const counts = {};
-  for (let r = 1; r <= schedule.NUM_ROUNDS; r++) counts[r] = 0;
-  for (const row of db.prepare('SELECT interview_round AS r, COUNT(*) AS c FROM examinees WHERE interview_round IS NOT NULL GROUP BY interview_round').all()) {
-    if (row.r) counts[row.r] = row.c;
-  }
-  return counts;
-}
-
-// בונה מחדש את 5 המשבצות של נבחן לפי המקצועות וסבב הריאיון (מוחק קודמות; התשובות נשמרות לפי פרק)
-function buildSlotsFor(code, subjects, mathLevel, interviewRound, seatIndex) {
-  db.prepare('DELETE FROM slots WHERE code = ?').run(code);
-  const plan = schedule.buildPlan({ subjects, mathLevel, interviewRound, seatIndex });
-  const insSlot = db.prepare(`INSERT INTO slots (code, round, kind, subject, level, chapter_id, variant_index, duration_sec)
-                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-  for (const s of plan) insSlot.run(code, s.round, s.kind, s.subject, s.level, s.chapter_id, s.variant_index, SLOT_DURATION_SEC);
-}
-
-// בוחר את סבב הריאיון המאוזן ביותר לפי הקיים והקיבולת פר-סבב
-function nextInterviewRound() {
-  return schedule.pickInterviewRound(interviewCounts(), getInterviewCaps());
-}
-
-function seatIndexFor() {
-  return db.prepare('SELECT COUNT(*) AS c FROM examinees').get().c;
-}
-
-// מצב הסבב האחרון ששוחרר (0 = טרם שוחרר דבר)
-function latestReleasedRound() {
-  const row = db.prepare('SELECT MAX(round) AS r FROM rounds WHERE released = 1').get();
+// הסבב שרץ כרגע (0 אם אין)
+function currentRunningRound() {
+  const row = db.prepare("SELECT MAX(round) AS r FROM rounds WHERE state = 'running'").get();
   return row && row.r ? row.r : 0;
+}
+// הסבב הגבוה ביותר שכבר התחיל (running/ended)
+function latestActiveRound() {
+  const row = db.prepare("SELECT MAX(round) AS r FROM rounds WHERE state != 'planned'").get();
+  return row && row.r ? row.r : 0;
+}
+
+// ---------- התקדמות פר-נבחן (נגזרת מ-slots + interview_marks) ----------
+function servedChapterIds(code, exceptRound) {
+  const rows = exceptRound
+    ? db.prepare("SELECT DISTINCT chapter_id FROM slots WHERE code = ? AND kind = 'chapter' AND round != ?").all(code, exceptRound)
+    : db.prepare("SELECT DISTINCT chapter_id FROM slots WHERE code = ? AND kind = 'chapter'").all(code);
+  return new Set(rows.map((r) => r.chapter_id));
+}
+function doneChapterIds(code) {
+  return new Set(db.prepare("SELECT DISTINCT chapter_id FROM slots WHERE code = ? AND kind = 'chapter' AND status = 'done'").all(code).map((r) => r.chapter_id));
+}
+function hasInterviewed(code) {
+  return !!db.prepare("SELECT 1 FROM slots WHERE code = ? AND kind = 'interview' AND status = 'done' LIMIT 1").get(code);
+}
+function isMarkedInterview(round, code) {
+  return !!db.prepare('SELECT 1 FROM interview_marks WHERE round = ? AND code = ?').get(round, code);
+}
+function chapterListForEx(ex) {
+  return schedule.chapterListFor(JSON.parse(ex.subjects || '[]'), ex.math_level);
+}
+
+// מה נבחן עושה בסבב נתון (מחושב בעת התחלת הסבב). מחזיר תיאור משבצת או null (idle).
+function resolveActivity(ex, round) {
+  if (isMarkedInterview(round, ex.code) && !hasInterviewed(ex.code)) {
+    return { kind: 'interview', subject: null, level: null, chapter_id: null };
+  }
+  const list = chapterListForEx(ex);
+  const next = schedule.nextChapter(servedChapterIds(ex.code, round), list);
+  if (next) return { kind: 'chapter', subject: next.subject, level: next.level, chapter_id: next.chapter_id };
+  return null; // אין פרק נותר — idle (צריך ריאיון או שסיים)
 }
 
 // חישוב מצב טיימר עבור משבצת
@@ -154,7 +150,7 @@ function ensureSlotStarted(code, round) {
 
 // ---------- בניית מצב מלא לנבחן (לשחזור מדויק) ----------
 function buildExamineeState(ex) {
-  const released = latestReleasedRound();
+  const running = currentRunningRound();
   const totalRounds = schedule.NUM_ROUNDS;
   const state = {
     examinee: {
@@ -162,9 +158,8 @@ function buildExamineeState(ex) {
       code: ex.code,
       subjects: JSON.parse(ex.subjects || '[]'),
       math_level: ex.math_level,
-      interview_round: ex.interview_round,
     },
-    rounds: { latest_released: released, total: totalRounds },
+    rounds: { current: running, total: totalRounds },
     server_now: now(),
   };
 
@@ -175,25 +170,40 @@ function buildExamineeState(ex) {
     return state;
   }
 
-  // נבחן שנפתח לו משתמש מראש אך עדיין לא בחר מקצועות — צריך להשלים הרשמה
+  // נבחן שעדיין לא בחר מקצועות — צריך להשלים הרשמה
   const subjectsArr = JSON.parse(ex.subjects || '[]');
-  const hasSlots = db.prepare('SELECT COUNT(*) AS c FROM slots WHERE code = ?').get(ex.code).c > 0;
-  if (!subjectsArr.length || !hasSlots) {
+  if (!subjectsArr.length) {
     state.phase = 'needs_setup';
     state.message = 'ברוך הבא! יש להשלים שאלון הצהרה ובחירת נושאים כדי להתחיל.';
     return state;
   }
 
-  if (released === 0) {
-    state.phase = 'waiting';
-    state.message = 'ממתינים לפתיחת הסבב הראשון על-ידי הבוחן.';
+  // סיים הכול (התראיין + כל הפרקים) — מסך סיום
+  const chapterList = chapterListForEx(ex);
+  const done = doneChapterIds(ex.code);
+  const allChaptersDone = chapterList.length > 0 && chapterList.every((c) => done.has(c.chapter_id));
+  if (running === 0 && hasInterviewed(ex.code) && allChaptersDone) {
+    state.phase = 'finished';
+    state.message = 'סיימת את כל המשבצות — תודה רבה!';
     return state;
   }
 
-  let slot = getSlot(ex.code, released);
-  if (!slot) {
+  if (running === 0) {
     state.phase = 'waiting';
-    state.message = 'ממתינים לפתיחת הסבב הבא.';
+    state.message = 'ממתינים לתחילת הסבב הבא על-ידי הבוחן.';
+    return state;
+  }
+
+  let slot = getSlot(ex.code, running);
+  if (!slot) {
+    // אין משבצת לנבחן בסבב הרץ (הצטרף מאוחר / סיים / ממתין לתורו)
+    if (hasInterviewed(ex.code) && allChaptersDone) {
+      state.phase = 'finished';
+      state.message = 'סיימת את כל המשבצות — תודה רבה!';
+    } else {
+      state.phase = 'waiting';
+      state.message = 'ממתינים לתחילת הסבב הבא.';
+    }
     return state;
   }
 
@@ -208,12 +218,12 @@ function buildExamineeState(ex) {
   if (slot.status === 'done') {
     state.phase = 'submitted';
     state.slot = { round: slot.round, kind: 'chapter', subject: slot.subject };
-    state.message = 'הפרק הוגש. ממתינים לפתיחת הסבב הבא על-ידי הבוחן.';
+    state.message = 'הפרק הוגש. ממתינים לתחילת הסבב הבא על-ידי הבוחן.';
     return state;
   }
 
   // משבצת פרק — מפעילים טיימר בכניסה ראשונה
-  slot = ensureSlotStarted(ex.code, released);
+  slot = ensureSlotStarted(ex.code, running);
   const chapter = content.getChapter(slot.chapter_id);
   state.phase = 'chapter';
   state.slot = {
@@ -265,18 +275,15 @@ app.post('/api/register', (req, res) => {
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
 
-  const interviewRound = nextInterviewRound();
-  const seatIndex = seatIndexFor();
-
   const token = newToken();
   db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')`).run(
+              VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'active')`).run(
     cleanCode, cleanName, token,
     JSON.stringify(declaration || null),
     JSON.stringify(chosenSubjects),
-    mathLevel, interviewRound, now()
+    mathLevel, now()
   );
-  buildSlotsFor(cleanCode, chosenSubjects, mathLevel, interviewRound, seatIndex);
+  // אין בניית slots מראש — הן נבנות חי כשהמנהל מתחיל סבב.
   logEvent(cleanCode, 'register', cleanName);
   return res.json({ token, restored: false, state: buildExamineeState(getExamineeByCode.get(cleanCode)) });
 });
@@ -288,11 +295,9 @@ app.post('/api/complete-setup', authExaminee, (req, res) => {
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const ex = req.examinee;
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
-  // שומרים על סבב הריאיון שהבוחן הגדיר מראש (אם קיים), אחרת בוחרים מאוזן
-  const interviewRound = ex.interview_round || nextInterviewRound();
-  db.prepare('UPDATE examinees SET subjects = ?, math_level = ?, declaration = ?, interview_round = ?, status = ? WHERE code = ?')
-    .run(JSON.stringify(chosenSubjects), mathLevel, JSON.stringify(declaration || null), interviewRound, 'active', ex.code);
-  buildSlotsFor(ex.code, chosenSubjects, mathLevel, interviewRound, seatIndexFor());
+  db.prepare('UPDATE examinees SET subjects = ?, math_level = ?, declaration = ?, status = ? WHERE code = ?')
+    .run(JSON.stringify(chosenSubjects), mathLevel, JSON.stringify(declaration || null), 'active', ex.code);
+  // אין בניית slots מראש — נבנות חי בהתחלת סבב.
   logEvent(ex.code, 'complete_setup', ex.name);
   res.json({ ok: true, state: buildExamineeState(getExamineeByCode.get(ex.code)) });
 });
@@ -389,7 +394,7 @@ app.post('/api/not-comfortable', authExaminee, (req, res) => {
 // הגשת פרק — הנבחן סיים והגיש. המשבצת נסגרת והוא ממתין לסבב הבא.
 app.post('/api/submit-slot', authExaminee, (req, res) => {
   const { round } = req.body || {};
-  const r = Number(round) || latestReleasedRound();
+  const r = Number(round) || currentRunningRound();
   const slot = getSlot(req.examinee.code, r);
   if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק פעיל להגשה.' });
   db.prepare('UPDATE slots SET status = ? WHERE code = ? AND round = ?').run('done', req.examinee.code, r);
@@ -436,13 +441,13 @@ app.post('/api/examiner/add-examinee', authExaminer, (req, res) => {
   const cleanName = String(name).trim(), cleanCode = String(code).trim();
   if (getExamineeByCode.get(cleanCode)) return res.status(409).json({ error: 'הקוד כבר קיים: ' + cleanCode });
   const chosen = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
-  const iRound = interview_round ? Number(interview_round) : (chosen.length ? nextInterviewRound() : null);
   const mathLevel = chosen.includes('מתמטיקה') ? (math_level || '5') : null;
   db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    cleanCode, cleanName, newToken(), JSON.stringify(null), JSON.stringify(chosen), mathLevel, iRound, now(),
+              VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(
+    cleanCode, cleanName, newToken(), JSON.stringify(null), JSON.stringify(chosen), mathLevel, now(),
     chosen.length ? 'active' : 'registered');
-  if (chosen.length) buildSlotsFor(cleanCode, chosen, mathLevel, iRound, seatIndexFor());
+  const r = Number(interview_round);
+  if (r >= 1 && r <= schedule.NUM_ROUNDS) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, cleanCode);
   logEvent(cleanCode, 'preregister', cleanName);
   res.json({ ok: true, code: cleanCode, needs_setup: chosen.length === 0 });
 });
@@ -461,58 +466,51 @@ app.post('/api/examiner/add-examinees-bulk', authExaminer, (req, res) => {
     if (!name || !code) { skipped.push(line + ' (חסר שם או קוד)'); continue; }
     if (getExamineeByCode.get(code)) { skipped.push(code + ' (כבר קיים)'); continue; }
     db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'registered')`).run(
-      code, name, newToken(), JSON.stringify(null), JSON.stringify([]), null, iRound, now());
+                VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'registered')`).run(
+      code, name, newToken(), JSON.stringify(null), JSON.stringify([]), null, now());
+    if (iRound) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(iRound, code);
     added++;
   }
   logEvent(null, 'bulk_preregister', `נוספו ${added}`);
   res.json({ ok: true, added, skipped });
 });
 
-// שינוי סבב הריאיון של נבחן (בונה מחדש את הלוח שלו אם כבר בחר מקצועות). מחזיר אזהרת חריגה מקיבולת.
-app.post('/api/examiner/set-interview-round', authExaminer, (req, res) => {
-  const { code, round } = req.body || {};
+// סימון/ביטול נבחן לריאיון בסבב מסוים (רק כשהסבב עדיין 'planned')
+app.post('/api/examiner/mark-interview', authExaminer, (req, res) => {
+  const { code, round, on } = req.body || {};
   const r = Number(round);
   if (!r || r < 1 || r > schedule.NUM_ROUNDS) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
+  if (roundState(r) !== 'planned') return res.status(400).json({ error: 'אפשר לסמן רק סבב שעדיין לא התחיל.' });
   const ex = getExamineeByCode.get(code);
   if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
-  db.prepare('UPDATE examinees SET interview_round = ? WHERE code = ?').run(r, code);
-  const subjects = JSON.parse(ex.subjects || '[]');
-  if (subjects.length) buildSlotsFor(code, subjects, ex.math_level, r, 0);
-  logEvent(code, 'set_interview_round', String(r));
-  const cap = getInterviewCaps()[r - 1];
-  const count = interviewCounts()[r];
-  res.json({ ok: true, round: r, count, cap, over: count > cap });
-});
-
-// הגדרת קיבולת מראיינים פר-סבב
-app.post('/api/examiner/set-interview-caps', authExaminer, (req, res) => {
-  const caps = setInterviewCaps((req.body && req.body.caps) || []);
-  logEvent(null, 'set_interview_caps', JSON.stringify(caps));
-  res.json({ ok: true, caps });
-});
-
-// איזון אוטומטי של סבבי הריאיון תוך כיבוד הקיבולות (עזר בלבד)
-app.post('/api/examiner/balance-interviews', authExaminer, (req, res) => {
-  const mode = (req.body && req.body.mode) === 'all' ? 'all' : 'unassigned';
-  const caps = getInterviewCaps();
-  const counts = interviewCounts();
-  if (mode === 'all') { for (let r = 1; r <= schedule.NUM_ROUNDS; r++) counts[r] = 0; }
-  // מי צריך שיבוץ: כולם (all) או רק חסרי-סבב (unassigned)
-  const rows = mode === 'all'
-    ? db.prepare('SELECT code, subjects, math_level FROM examinees ORDER BY created_at').all()
-    : db.prepare('SELECT code, subjects, math_level FROM examinees WHERE interview_round IS NULL ORDER BY created_at').all();
-  let assigned = 0;
-  for (const ex of rows) {
-    const r = schedule.pickInterviewRound(counts, caps);
-    counts[r] = (counts[r] || 0) + 1;
-    db.prepare('UPDATE examinees SET interview_round = ? WHERE code = ?').run(r, ex.code);
-    const subjects = JSON.parse(ex.subjects || '[]');
-    if (subjects.length) buildSlotsFor(ex.code, subjects, ex.math_level, r, 0);
-    assigned++;
+  if (on) {
+    if (hasInterviewed(code)) return res.json({ ok: false, warn: 'נבחן זה כבר התראיין — אין צורך לסמן שוב.' });
+    db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, code);
+    // ריאיון פעם אחת: מסירים סימון מכל סבב planned אחר
+    db.prepare("DELETE FROM interview_marks WHERE code = ? AND round != ? AND round IN (SELECT round FROM rounds WHERE state = 'planned')").run(code, r);
+  } else {
+    db.prepare('DELETE FROM interview_marks WHERE round = ? AND code = ?').run(r, code);
   }
-  logEvent(null, 'balance_interviews', `${mode} · ${assigned}`);
-  res.json({ ok: true, assigned, counts });
+  logEvent(code, 'mark_interview', `round ${r} ${on ? 'on' : 'off'}`);
+  res.json({ ok: true });
+});
+
+// העלאת לוח תכנון בהדבקה: כל שורה "קוד/שם, סבב" → מסמן ריאיונות מראש
+app.post('/api/examiner/set-interview-plan', authExaminer, (req, res) => {
+  const lines = String((req.body && req.body.text) || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let marked = 0; const skipped = [];
+  for (const line of lines) {
+    const parts = line.split(/[,\t;]/).map((s) => s.trim());
+    const key = parts[0]; const r = Number(parts[1]);
+    if (!key || !(r >= 1 && r <= schedule.NUM_ROUNDS)) { skipped.push(line); continue; }
+    const ex = getExamineeByCode.get(key) || db.prepare('SELECT * FROM examinees WHERE name = ?').get(key);
+    if (!ex) { skipped.push(line + ' (לא נמצא)'); continue; }
+    if (roundState(r) !== 'planned') { skipped.push(line + ' (הסבב כבר התחיל)'); continue; }
+    db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, ex.code);
+    marked++;
+  }
+  logEvent(null, 'set_interview_plan', `סומנו ${marked}`);
+  res.json({ ok: true, marked, skipped });
 });
 
 // הסרת נבחן (שימושי לניקוי נבחני בדיקה)
@@ -524,55 +522,118 @@ app.post('/api/examiner/remove-examinee', authExaminer, (req, res) => {
   res.json({ ok: true });
 });
 
-// שחרור קוד סבב — פותח לכולם את המשבצת הבאה
-app.post('/api/examiner/release-round', authExaminer, (req, res) => {
-  const { round } = req.body || {};
-  const r = Number(round);
+// התחלת סבב — בונה חי לכל נבחן פעיל את המשבצת שלו (ריאיון לפי סימון, אחרת הפרק הבא)
+app.post('/api/examiner/start-round', authExaminer, (req, res) => {
+  const r = Number((req.body || {}).round);
   if (!r || r < 1 || r > schedule.NUM_ROUNDS) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
-  db.prepare('UPDATE rounds SET released = 1, released_at = ? WHERE round = ?').run(now(), r);
-  logEvent(null, 'release_round', String(r));
+  if (roundState(r) !== 'planned') return res.status(400).json({ error: 'הסבב כבר התחיל.' });
+  if (r > 1 && roundState(r - 1) !== 'ended') return res.status(400).json({ error: `יש לסיים קודם את סבב ${r - 1}.` });
+  const running = currentRunningRound();
+  if (running) return res.status(400).json({ error: `סבב ${running} עדיין פועל — סיים אותו קודם.` });
+
+  const examinees = db.prepare("SELECT * FROM examinees WHERE status = 'active'").all();
+  const insSlot = db.prepare(`INSERT INTO slots (code, round, kind, subject, level, chapter_id, duration_sec)
+                              VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code, round) DO NOTHING`);
+  let chapters = 0, interviews = 0;
+  for (const ex of examinees) {
+    if (JSON.parse(ex.subjects || '[]').length === 0) continue; // עדיין לא בחר מקצועות
+    const act = resolveActivity(ex, r);
+    if (!act) continue; // idle — אין משבצת
+    insSlot.run(ex.code, r, act.kind, act.subject, act.level, act.chapter_id, SLOT_DURATION_SEC);
+    if (act.kind === 'interview') interviews++; else chapters++;
+  }
+  db.prepare("UPDATE rounds SET state = 'running', started_at = ?, released = 1, released_at = ? WHERE round = ?").run(now(), now(), r);
+  logEvent(null, 'start_round', `round ${r} · ${interviews} ריאיון · ${chapters} פרק`);
+  res.json({ ok: true, round: r, interviews, chapters });
+});
+
+// סיום סבב — כל המשבצות נסגרות (done), הסבב עובר ל-ended
+app.post('/api/examiner/end-round', authExaminer, (req, res) => {
+  const r = Number((req.body || {}).round) || currentRunningRound();
+  if (!r || roundState(r) !== 'running') return res.status(400).json({ error: 'אין סבב פעיל לסיום.' });
+  makeBackup('pre-end-round');
+  db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'").run(r);
+  db.prepare("UPDATE rounds SET state = 'ended' WHERE round = ?").run(r);
+  logEvent(null, 'end_round', String(r));
   res.json({ ok: true, round: r });
 });
 
-// סטטוס חי של כל הנבחנים
+// איפוס סבב — מבטל את הסבב הנוכחי (מוחק את המשבצות שלו) ומחזיר ל-planned. התשובות נשמרות.
+app.post('/api/examiner/reset-round', authExaminer, (req, res) => {
+  const r = Number((req.body || {}).round);
+  if (!r || roundState(r) === 'planned') return res.status(400).json({ error: 'אין מה לאפס בסבב זה.' });
+  if (latestActiveRound() !== r) return res.status(400).json({ error: `אפס קודם את סבב ${latestActiveRound()} (המאוחר יותר).` });
+  makeBackup('pre-reset-round');
+  db.prepare('DELETE FROM slots WHERE round = ?').run(r);
+  db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE round = ?").run(r);
+  logEvent(null, 'reset_round', String(r));
+  res.json({ ok: true, round: r });
+});
+
+// איפוס המשבצת של כל הנבחנים בסבב הרץ (טיימר מחדש)
+app.post('/api/examiner/reset-all-current', authExaminer, (req, res) => {
+  const r = currentRunningRound();
+  if (!r) return res.status(400).json({ error: 'אין סבב פעיל.' });
+  makeBackup('pre-reset-all');
+  db.prepare("UPDATE slots SET started_at = NULL, status = 'pending', paused = 0, paused_at = NULL, paused_accum_sec = 0 WHERE round = ?").run(r);
+  logEvent(null, 'reset_all_current', String(r));
+  res.json({ ok: true, round: r });
+});
+
+// איפוס יום מלא — מחזיר את כל הסבבים ל-planned ומוחק את כל המשבצות והתשובות (שומר נבחנים, מקצועות ותכנון)
+app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
+  makeBackup('pre-full-reset');
+  db.prepare('DELETE FROM slots').run();
+  db.prepare('DELETE FROM answers').run();
+  db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL").run();
+  setConfig('exam_ended', '0');
+  logEvent(null, 'full_reset', '');
+  res.json({ ok: true });
+});
+
+// סטטוס חי של כל הנבחנים + מצב הסבבים + סימוני ריאיון
 app.get('/api/examiner/status', authExaminer, (req, res) => {
-  const released = latestReleasedRound();
+  const running = currentRunningRound();
+  const roundsArr = db.prepare('SELECT round, state, started_at FROM rounds ORDER BY round').all();
+  const marks = db.prepare('SELECT round, code FROM interview_marks').all();
   const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
   const list = examinees.map((ex) => {
-    const slot = released ? getSlot(ex.code, released) : null;
+    const subjects = JSON.parse(ex.subjects || '[]');
+    const setup = subjects.length > 0;
+    const chapterList = setup ? chapterListForEx(ex) : [];
+    const done = doneChapterIds(ex.code);
+    const interviewed = hasInterviewed(ex.code);
+    const slot = running ? getSlot(ex.code, running) : null;
     const timer = slot ? computeTimer(slot) : { state: 'none', remaining_sec: 0 };
-    const answered = db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?')
-      .get(ex.code, slot ? slot.chapter_id : '').c;
-    const flags = db.prepare("SELECT COUNT(*) AS c FROM events WHERE code = ? AND type IN ('blur','tabhide','paste_blocked')")
-      .get(ex.code).c;
+    const answered = slot && slot.chapter_id
+      ? db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?').get(ex.code, slot.chapter_id).c : 0;
+    const flags = db.prepare("SELECT COUNT(*) AS c FROM events WHERE code = ? AND type IN ('blur','tabhide','paste_blocked')").get(ex.code).c;
+    const doneNames = chapterList.filter((c) => done.has(c.chapter_id)).map((c) => c.subject);
+    const remaining = chapterList
+      .filter((c) => !done.has(c.chapter_id) && (!slot || slot.chapter_id !== c.chapter_id))
+      .map((c) => c.subject);
+    const current = slot ? {
+      round: slot.round, kind: slot.kind, subject: slot.subject, level: slot.level,
+      status: slot.status, not_comfortable: !!slot.not_comfortable,
+    } : null;
+    const finished = setup && interviewed && chapterList.length > 0 && chapterList.every((c) => done.has(c.chapter_id));
     return {
-      code: ex.code,
-      name: ex.name,
-      subjects: JSON.parse(ex.subjects || '[]'),
-      interview_round: ex.interview_round,
-      current: slot ? {
-        round: slot.round,
-        kind: slot.kind,
-        subject: slot.subject,
-        level: slot.level,
-        status: slot.status,
-        not_comfortable: !!slot.not_comfortable,
-      } : null,
-      timer,
-      answered,
-      flags,
+      code: ex.code, name: ex.name, setup, subjects,
+      chapters_total: chapterList.length,
+      chapters_done: doneNames,
+      remaining_chapters: remaining,
+      interviewed, needs_interview: setup && !interviewed && !finished, finished,
+      current, timer, answered, flags,
+      marked_rounds: marks.filter((m) => m.code === ex.code).map((m) => m.round),
     };
   });
-  res.json({
-    latest_released: released, total_rounds: schedule.NUM_ROUNDS, examinees: list,
-    interview_caps: getInterviewCaps(), interview_counts: interviewCounts(),
-  });
+  res.json({ running, total_rounds: schedule.NUM_ROUNDS, rounds: roundsArr, examinees: list });
 });
 
 // עקיפות ידניות: הוספת זמן / השהיה / המשך / איפוס משבצת
 app.post('/api/examiner/override', authExaminer, (req, res) => {
   const { code, round, action, seconds } = req.body || {};
-  const r = Number(round) || latestReleasedRound();
+  const r = Number(round) || currentRunningRound();
   const slot = getSlot(code, r);
   if (!slot) return res.status(404).json({ error: 'לא נמצאה משבצת.' });
   const t = now();
@@ -611,7 +672,7 @@ app.post('/api/examiner/override', authExaminer, (req, res) => {
 // השהיה/המשך של כל הנבחנים בסבב הנוכחי בבת אחת
 app.post('/api/examiner/pause-all', authExaminer, (req, res) => {
   const pause = req.body && req.body.pause !== false; // ברירת מחדל: השהה
-  const r = latestReleasedRound();
+  const r = currentRunningRound();
   const t = now();
   const slots = db.prepare("SELECT * FROM slots WHERE round = ? AND kind = 'chapter' AND status = 'active'").all(r);
   let n = 0;

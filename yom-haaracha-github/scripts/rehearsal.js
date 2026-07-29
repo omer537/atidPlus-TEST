@@ -59,29 +59,31 @@ async function main() {
       subjects, math_level: subjects.includes('מתמטיקה') ? ['5', '4', '3'][i % 3] : null,
       declaration: {},
     });
-    if (r.ok) examinees.push({ code, name: 'נבחן ' + (i + 1), token: r.data.token, subjects, iRound: r.data.state.examinee.interview_round });
+    if (r.ok) examinees.push({ code, name: 'נבחן ' + (i + 1), token: r.data.token, subjects });
   }
   check(examinees.length === N, `נרשמו ${examinees.length}/${N} נבחנים`);
 
-  // איזון סבבי ריאיון
-  const iCounts = {};
-  examinees.forEach((e) => { iCounts[e.iRound] = (iCounts[e.iRound] || 0) + 1; });
-  console.log('  פיזור סבבי ריאיון:', JSON.stringify(iCounts));
-  check(Object.values(iCounts).every((c) => c <= Math.ceil(N / 5) + 1), 'סבבי הריאיון מאוזנים (≈' + Math.ceil(N / 5) + ' לכל סבב)');
-
-  // 5 סבבים
+  // 5 סבבים — במודל החי: מסמנים ~1/5 לריאיון בכל סבב, מתחילים, עונים, מסיימים
   let totalAnswers = 0;
+  const interviewed = new Set();
   for (let round = 1; round <= 5; round++) {
     console.log(`\n--- סבב ${round} ---`);
-    const rel = await api('/examiner/release-round', 'POST', { round }, examinerToken);
-    check(rel.ok, `שחרור קוד סבב ${round}`);
+    // מסמנים לריאיון את מי שעדיין לא התראיין (חלוקה שווה על פני הסבבים)
+    for (let i = 0; i < examinees.length; i++) {
+      const ex = examinees[i];
+      if (!interviewed.has(ex.code) && (i % 5) + 1 === round) {
+        await api('/examiner/mark-interview', 'POST', { code: ex.code, round, on: true }, examinerToken);
+        interviewed.add(ex.code);
+      }
+    }
+    const st1 = await api('/examiner/start-round', 'POST', { round }, examinerToken);
+    check(st1.ok, `התחלת סבב ${round}`);
 
     for (const ex of examinees) {
       const st = await api('/state', 'GET', null, ex.token);
       if (!st.ok) continue;
       const s = st.data;
       if (s.phase === 'chapter') {
-        // ענה על כל הפריטים
         for (const it of s.chapter.items) {
           const answer = it.options ? it.options[0].id : ('הסבר לדוגמה של ' + ex.name + ' לפריט ' + it.id + '. '.repeat(3));
           const sv = await api('/save-answer', 'POST', { round, chapter_id: s.slot.chapter_id, item_id: it.id, type: it.type, answer, time_spent_sec: 60 }, ex.token);
@@ -89,21 +91,27 @@ async function main() {
         }
       }
     }
+    // "שבירה מכוונת": ניתוק ושחזור תוך כדי סבב 2 (כשיש פרק פעיל)
+    if (round === 2) {
+      console.log('\n--- מבחן ניתוק ושחזור (תוך כדי סבב) ---');
+      const victim = examinees[0];
+      const before = (await api('/state', 'GET', null, victim.token)).data;
+      const relogin = await api('/login', 'POST', { name: victim.name, code: victim.code });
+      check(relogin.ok, 'שחזור עם שם + קוד לאחר "ניתוק"');
+      const after = relogin.data.state;
+      check(before.phase === 'chapter' && after.phase === 'chapter' && before.slot.chapter_id === after.slot.chapter_id,
+        'הנבחן חזר בדיוק לאותו פרק');
+      check((after.answers || []).length > 0, `התשובות שרדו את השחזור (${(after.answers || []).length} תשובות)`);
+      victim.token = relogin.data.token;
+    }
+
+    const en = await api('/examiner/end-round', 'POST', { round }, examinerToken);
+    check(en.ok, `סיום סבב ${round}`);
   }
 
-  // "שבירה מכוונת": ניתוק ושחזור של נבחן אחד
-  console.log('\n--- מבחן ניתוק ושחזור (שבירה מכוונת) ---');
-  const victim = examinees[Math.floor(N / 2)];
-  const before = (await api('/state', 'GET', null, victim.token)).data;
-  const relogin = await api('/login', 'POST', { name: victim.name, code: victim.code });
-  check(relogin.ok, 'שחזור עם שם + קוד לאחר "ניתוק"');
-  const after = relogin.data.state;
-  check(before && after && before.slot && after.slot && before.slot.round === after.slot.round && before.slot.chapter_id === after.slot.chapter_id,
-    'הנבחן חזר בדיוק לאותה נקודה (סבב + פרק זהים)');
-
-  // אימות שמירה: התשובות של הנבחן נשמרו ושרדו
-  const savedForVictim = (relogin.data.state.answers || []).length;
-  check(savedForVictim > 0, `התשובות של הנבחן שרדו את השחזור (${savedForVictim} תשובות בפרק הנוכחי)`);
+  // אימות: כל הנבחנים התראיינו בדיוק פעם אחת
+  const st = (await api('/examiner/status', 'GET', null, examinerToken)).data;
+  check(st.examinees.every((e) => e.interviewed), 'כל הנבחנים התראיינו פעם אחת');
 
   // סטטוס בוחן + ייצוא
   const status = await api('/examiner/status', 'GET', null, examinerToken);

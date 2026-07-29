@@ -69,7 +69,17 @@ CREATE TABLE IF NOT EXISTS rounds (
   round        INTEGER PRIMARY KEY,       -- 1..5
   code         TEXT,                      -- קוד הסבב (סיסמה) שהבוחן מכריז
   released     INTEGER NOT NULL DEFAULT 0,
-  released_at  INTEGER
+  released_at  INTEGER,
+  state        TEXT NOT NULL DEFAULT 'planned',  -- planned | running | ended
+  started_at   INTEGER
+);
+
+-- מי מסומן לריאיון בכל סבב (המנהל קובע, מראש או חי)
+CREATE TABLE IF NOT EXISTS interview_marks (
+  round  INTEGER NOT NULL,
+  code   TEXT NOT NULL,
+  PRIMARY KEY (round, code),
+  FOREIGN KEY (code) REFERENCES examinees(code) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -85,6 +95,14 @@ CREATE TABLE IF NOT EXISTS config (
   value TEXT
 );
 `);
+
+// מיגרציה עדינה לבסיסי נתונים קיימים (בשרת) — הוספת עמודות חדשות אם חסרות.
+for (const alter of [
+  "ALTER TABLE rounds ADD COLUMN state TEXT NOT NULL DEFAULT 'planned'",
+  'ALTER TABLE rounds ADD COLUMN started_at INTEGER',
+]) {
+  try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
+}
 
 // אתחול 5 סבבים אם עדיין לא קיימים, עם קודי ברירת מחדל שהבוחן יכול לשנות.
 const roundCount = db.prepare('SELECT COUNT(*) AS c FROM rounds').get().c;

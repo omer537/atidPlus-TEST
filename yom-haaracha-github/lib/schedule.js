@@ -81,6 +81,23 @@ function buildPlan({ subjects, mathLevel, interviewRound, seatIndex = 0 }) {
   return slots;
 }
 
+// רשימת הפרקים המסודרת של נבחן (לפי המקצועות שבחר), למודל החי.
+// מחזיר מערך של {subject, level, chapter_id}.
+function chapterListFor(subjects, mathLevel) {
+  const chapterSubjects = buildChapterSubjects(subjects);
+  return chapterSubjects.map((subject) => {
+    const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
+    const ch = content.findChapter(subject, level, 0);
+    return { subject, level, chapter_id: ch ? ch.chapter_id : null };
+  }).filter((c) => c.chapter_id);
+}
+
+// הפרק הבא שטרם נעשה (מתוך הרשימה), בהינתן קבוצת מזהי הפרקים שכבר הוגשו.
+function nextChapter(servedChapterIds, chapterList) {
+  const served = servedChapterIds instanceof Set ? servedChapterIds : new Set(servedChapterIds || []);
+  return chapterList.find((c) => !served.has(c.chapter_id)) || null;
+}
+
 module.exports = {
   NUM_ROUNDS,
   NUM_CHAPTERS,
@@ -88,4 +105,6 @@ module.exports = {
   buildChapterSubjects,
   pickInterviewRound,
   buildPlan,
+  chapterListFor,
+  nextChapter,
 };
