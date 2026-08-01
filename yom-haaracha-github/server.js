@@ -44,6 +44,36 @@ function pushToSheet(row) {
   } catch (e) { /* אף פעם לא זורק החוצה */ }
 }
 
+// דוחף לגוגל שיטס את *התשובות המלאות* של פרק אחד (שורה לכל שאלה):
+// טקסט השאלה, התשובה המפוענחת, "לא יודע/ת", ונכון/לא-נכון לרב-ברירה.
+// אותה לוגיקת פיענוח כמו בייצוא ל-Excel. שקט מוחלט אם ה-webhook לא הוגדר.
+function pushChapterAnswers(examinee, slot) {
+  if (!SHEETS_WEBHOOK_URL || !examinee || !slot || !slot.chapter_id) return;
+  const ch = content.getChapter(slot.chapter_id);
+  const rows = db.prepare('SELECT item_id, type, answer, dont_know FROM answers WHERE code = ? AND chapter_id = ?')
+    .all(examinee.code, slot.chapter_id);
+  const answers = rows.map((a) => {
+    const item = ch && (ch.items || []).find((i) => i.id === a.item_id);
+    let question = item ? (item.stem || item.prompt || '') : '';
+    let answerText = a.answer || '';
+    let correct = '';
+    if ((a.type === 'mc_apply' || a.type === 'mc_error_dialogue') && item && item.options) {
+      const opt = item.options.find((o) => o.id === a.answer);
+      answerText = opt ? (opt.text || opt.tex || a.answer) : a.answer;
+      correct = opt ? (opt.correct ? 'נכון' : 'לא נכון') : '';
+    }
+    if (a.dont_know) answerText = '— לא יודע/ת —';
+    return { item_id: a.item_id, question, answer: answerText, dont_know: !!a.dont_know, correct };
+  });
+  if (!answers.length) return;
+  pushToSheet({
+    event: 'chapter', at: new Date().toISOString(),
+    name: examinee.name, round: slot.round,
+    subject: slot.subject || '', level: slot.level || '', chapter_id: slot.chapter_id || '',
+    answers,
+  });
+}
+
 app.use(express.json({ limit: '1mb' }));
 
 // ---------- כלי עזר ----------
@@ -309,7 +339,7 @@ function buildExamineeState(ex) {
   state.timer = computeTimer(slot);
   // תשובות שכבר נשמרו (לשחזור)
   state.answers = db.prepare(
-    'SELECT item_id, type, answer, time_spent_sec FROM answers WHERE code = ? AND chapter_id = ?'
+    'SELECT item_id, type, answer, time_spent_sec, dont_know FROM answers WHERE code = ? AND chapter_id = ?'
   ).all(ex.code, slot.chapter_id);
   return state;
 }
@@ -318,9 +348,10 @@ function buildExamineeState(ex) {
 //  נקודות קצה — נבחן
 // ============================================================
 
-// רשימת המקצועות הזמינים (לבחירה ולשאלון ההצהרה)
+// רשימת המקצועות הזמינים לבחירה במבחן. «מידע כללי» מוסתר — הוא פרק חובה
+// שמשובץ אוטומטית לכולם ואינו נבחר על ידי הנבחן.
 app.get('/api/subjects', (req, res) => {
-  res.json({ subjects: content.listSubjects() });
+  res.json({ subjects: content.listSubjects().filter((s) => s !== schedule.GENERAL_SUBJECT) });
 });
 
 // רישום נבחן חדש (או שחזור אם הקוד כבר קיים עם אותו שם)
@@ -344,7 +375,8 @@ app.post('/api/register', (req, res) => {
     return res.json({ token, restored: true, state: buildExamineeState(getExamineeByCode.get(existing.code)) });
   }
 
-  const chosenSubjects = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
+  const chosenSubjects = Array.isArray(subjects)
+    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, schedule.NUM_CHOSEN) : [];
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
 
@@ -365,7 +397,8 @@ app.post('/api/register', (req, res) => {
 // השלמת הרשמה לנבחן שנפתח לו משתמש מראש (בחירת מקצועות + הצהרה)
 app.post('/api/complete-setup', authExaminee, (req, res) => {
   const { subjects, math_level, declaration } = req.body || {};
-  const chosenSubjects = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
+  const chosenSubjects = Array.isArray(subjects)
+    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, schedule.NUM_CHOSEN) : [];
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const ex = req.examinee;
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
@@ -402,21 +435,23 @@ app.get('/api/state', authExaminee, (req, res) => {
 
 // שמירה אוטומטית של תשובה (idempotent — נקרא תדיר)
 app.post('/api/save-answer', authExaminee, (req, res) => {
-  const { round, chapter_id, item_id, type, answer, time_spent_sec } = req.body || {};
+  const { round, chapter_id, item_id, type, answer, time_spent_sec, dont_know } = req.body || {};
   if (!chapter_id || !item_id) return res.status(400).json({ error: 'חסר מזהה פרק או פריט.' });
   const t = now();
+  const dk = dont_know ? 1 : 0;
   const existing = db.prepare('SELECT started_at FROM answers WHERE code = ? AND chapter_id = ? AND item_id = ?')
     .get(req.examinee.code, chapter_id, item_id);
-  db.prepare(`INSERT INTO answers (code, round, chapter_id, item_id, type, answer, started_at, updated_at, time_spent_sec)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  db.prepare(`INSERT INTO answers (code, round, chapter_id, item_id, type, answer, started_at, updated_at, time_spent_sec, dont_know)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(code, chapter_id, item_id) DO UPDATE SET
                 answer = excluded.answer,
                 type = excluded.type,
                 updated_at = excluded.updated_at,
-                time_spent_sec = excluded.time_spent_sec`).run(
+                time_spent_sec = excluded.time_spent_sec,
+                dont_know = excluded.dont_know`).run(
     req.examinee.code, round || 0, chapter_id, item_id, type || null,
     typeof answer === 'string' ? answer : JSON.stringify(answer ?? ''),
-    existing ? existing.started_at : t, t, Number(time_spent_sec) || 0
+    existing ? existing.started_at : t, t, Number(time_spent_sec) || 0, dk
   );
   res.json({ ok: true, saved_at: t });
 });
@@ -488,14 +523,8 @@ app.post('/api/submit-slot', authExaminee, (req, res) => {
   if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק פעיל להגשה.' });
   db.prepare('UPDATE slots SET status = ? WHERE code = ? AND round = ?').run('done', req.examinee.code, r);
   logEvent(req.examinee.code, 'submit', `round ${r}`);
-  // גוגל שיטס לייב: שורה בכל הגשת פרק (כדי לראות בזמן אמת שהתוצאות נכנסות)
-  const answered = db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?').get(req.examinee.code, slot.chapter_id).c;
-  pushToSheet({
-    event: 'submit', at: new Date().toISOString(),
-    name: req.examinee.name, round: r,
-    subject: slot.subject || '', chapter_id: slot.chapter_id || '',
-    level: slot.level || '', answered,
-  });
+  // גוגל שיטס לייב: התשובות המלאות של הפרק בכל הגשה (צפייה חיה + עותק חיצוני)
+  pushChapterAnswers(req.examinee, slot);
   res.json({ ok: true, state: buildExamineeState(getExamineeByCode.get(req.examinee.code)) });
 });
 
@@ -673,6 +702,15 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
   makeBackup('pre-end-round');
   // מי שהמשבצת שלו בסבב זה היא ריאיון — מסומן "התראיין"
   db.prepare("UPDATE examinees SET interviewed = 1 WHERE code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(r);
+  // גוגל שיטס: לדחוף את התשובות של מי שלא לחץ "הגש" *לפני* סגירת הסבב —
+  // כך אף תשובה לא נעדרת מהגיליון, ובלי כפילויות (המוגשים כבר 'done' ונדחפו בהגשה).
+  if (SHEETS_WEBHOOK_URL) {
+    const pending = db.prepare("SELECT * FROM slots WHERE round = ? AND kind = 'chapter' AND status != 'done'").all(r);
+    for (const s of pending) {
+      const ex = getExamineeByCode.get(s.code);
+      if (ex) pushChapterAnswers(ex, s);
+    }
+  }
   db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'").run(r);
   db.prepare("UPDATE rounds SET state = 'ended' WHERE round = ?").run(r);
   logEvent(null, 'end_round', String(r));
@@ -829,6 +867,7 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
     const finished = setup && interviewed && chapterList.length > 0 && chapterList.every((c) => doneSubj.has(c.subject));
     return {
       code: ex.code, name: ex.name, pin: ex.pin || '', setup, subjects, left,
+      declaration: JSON.parse(ex.declaration || 'null'),
       chapters_total: chapterList.length,
       chapters_done: doneNames,
       remaining_chapters: remaining,
@@ -994,6 +1033,7 @@ function buildFullExport() {
       slots: slots.map((s) => ({ round: s.round, kind: s.kind, subject: s.subject, level: s.level, chapter_id: s.chapter_id })),
       answers: answers.map((a) => ({
         round: a.round, chapter_id: a.chapter_id, item_id: a.item_id, type: a.type, answer: a.answer,
+        dont_know: !!a.dont_know,
         started_at: a.started_at ? new Date(a.started_at).toISOString() : null,
         updated_at: a.updated_at ? new Date(a.updated_at).toISOString() : null,
         time_spent_sec: a.time_spent_sec,
@@ -1076,6 +1116,7 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
         answerText = opt ? (opt.text || opt.tex || a.answer) : a.answer;
         correct = opt ? (opt.correct ? 'נכון' : 'לא נכון') : '';
       }
+      if (a.dont_know) answerText = '— לא יודע/ת —';
       rows.push({
         'שם': ex.name,
         'קוד': ex.code,
@@ -1086,16 +1127,17 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
         'סוג': a.type,
         'השאלה': questionText,
         'התשובה שנתן/ה': answerText,
+        'לא יודע/ת': a.dont_know ? 'כן' : '',
         'נכון (רב-ברירה)': correct,
         'זמן (שניות)': a.time_spent_sec || 0,
         'עודכן': a.updated_at ? new Date(a.updated_at).toLocaleString('he-IL') : '',
       });
     }
   }
-  const header = ['שם', 'קוד', 'סבב', 'מקצוע', 'פרק', 'מזהה שאלה', 'סוג', 'השאלה', 'התשובה שנתן/ה', 'נכון (רב-ברירה)', 'זמן (שניות)', 'עודכן'];
+  const header = ['שם', 'קוד', 'סבב', 'מקצוע', 'פרק', 'מזהה שאלה', 'סוג', 'השאלה', 'התשובה שנתן/ה', 'לא יודע/ת', 'נכון (רב-ברירה)', 'זמן (שניות)', 'עודכן'];
   const ws = XLSX.utils.json_to_sheet(rows, { header });
   ws['!views'] = [{ RTL: true }];
-  ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 40 }, { wch: 50 }, { wch: 14 }, { wch: 11 }, { wch: 18 }];
+  ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 40 }, { wch: 50 }, { wch: 10 }, { wch: 14 }, { wch: 11 }, { wch: 18 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'תשובות');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
@@ -1110,20 +1152,26 @@ app.get('/api/examiner/export-roster', authExaminer, (req, res) => {
   const rows = examinees.map((ex) => {
     const marks = db.prepare('SELECT round FROM interview_marks WHERE code = ? ORDER BY round').all(ex.code).map((r) => r.round);
     const subs = JSON.parse(ex.subjects || '[]');
+    let decl = null;
+    try { decl = JSON.parse(ex.declaration || 'null'); } catch (e) { decl = null; }
+    const declSubs = (decl && Array.isArray(decl.subjects)) ? decl.subjects : [];
+    const declNote = (decl && typeof decl.note === 'string') ? decl.note : '';
     return {
       'שם': ex.name,
       'קוד אישי (סיסמה)': ex.pin || '',
-      'מקצועות': subs.join(', '),
+      'מקצועות למבחן': subs.join(', '),
       'רמת מתמטיקה': ex.math_level || '',
+      'מקצועות שהוצהרו': declSubs.join(', '),
+      'הערות (הצהרה)': declNote,
       'סבב ריאיון': marks.length ? marks.join(', ') : '',
       'התראיין': ex.interviewed ? 'כן' : '',
       'סטטוס': ex.status === 'left' ? 'עזב' : (ex.status === 'active' ? 'פעיל' : 'רשום'),
     };
   });
-  const header = ['שם', 'קוד אישי (סיסמה)', 'מקצועות', 'רמת מתמטיקה', 'סבב ריאיון', 'התראיין', 'סטטוס'];
+  const header = ['שם', 'קוד אישי (סיסמה)', 'מקצועות למבחן', 'רמת מתמטיקה', 'מקצועות שהוצהרו', 'הערות (הצהרה)', 'סבב ריאיון', 'התראיין', 'סטטוס'];
   const ws = XLSX.utils.json_to_sheet(rows, { header });
   ws['!views'] = [{ RTL: true }];
-  ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 11 }, { wch: 9 }, { wch: 10 }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 28 }, { wch: 12 }, { wch: 34 }, { wch: 30 }, { wch: 11 }, { wch: 9 }, { wch: 10 }];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'נבחנים');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });

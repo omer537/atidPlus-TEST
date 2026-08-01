@@ -7,6 +7,8 @@ const content = require('./content');
 
 const NUM_ROUNDS = 5;
 const NUM_CHAPTERS = 4;
+const NUM_CHOSEN = 3;                    // הנבחן בוחר 3 מקצועות; הפרק הרביעי קבוע.
+const GENERAL_SUBJECT = 'מידע כללי';     // פרק חובה לכולם — פענוח חומר חדש והסברתו לתלמיד.
 
 // מתמטיקה: 5 → 4 → 3. לא יורד מתחת ל-3.
 function lowerLevel(level) {
@@ -15,12 +17,14 @@ function lowerLevel(level) {
   return String(n - 1);
 }
 
-// בונה רשימת 4 מקצועות לפרקים: אם נבחרו פחות מ-4, הנושא הראשי חוזר וממלא.
+// בונה רשימת 4 מקצועות לפרקים: עד 3 שהנבחן בחר (הראשי חוזר וממלא אם בחר פחות),
+// והפרק הרביעי הוא תמיד «מידע כללי» — פרק החובה שכולם עושים.
 function buildChapterSubjects(subjects) {
-  const chosen = (subjects || []).filter(Boolean);
+  const chosen = (subjects || []).filter((s) => s && s !== GENERAL_SUBJECT);
   const main = chosen[0];
-  const out = chosen.slice(0, NUM_CHAPTERS);
-  while (out.length < NUM_CHAPTERS && main) out.push(main);
+  const out = chosen.slice(0, NUM_CHOSEN);
+  while (out.length < NUM_CHOSEN && main) out.push(main);
+  out.push(GENERAL_SUBJECT);
   return out;
 }
 
@@ -101,6 +105,8 @@ function nextChapter(servedChapterIds, chapterList) {
 module.exports = {
   NUM_ROUNDS,
   NUM_CHAPTERS,
+  NUM_CHOSEN,
+  GENERAL_SUBJECT,
   lowerLevel,
   buildChapterSubjects,
   pickInterviewRound,

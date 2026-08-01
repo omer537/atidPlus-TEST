@@ -1,0 +1,96 @@
+{
+  "chapter_id": "entrepreneurship_girls_plus_01",
+  "subject": "יזמות גירלס פלוס",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "יזמות, טכנולוגיה ו-AI (גירלס פלוס)",
+  "planner_note": "שאלון גירלס פלוס — בנות בלבד · שאלות פתוחות (תשובות במילים) · וריאנט יחיד (אין החלפה) · אין ידע מוקדם נדרש, נבחן עניין ואוריינטציה",
+  "display_title": "גירלס פלוס — יזמות וטכנולוגיה",
+  "source": {
+    "type": "text_source",
+    "text": "שאלון גירלס פלוס — יזמות, טכנולוגיה ו-AI. אין כאן תשובות נכונות או שגויות: המטרה להכיר אותך, את תחומי העניין ואת הדרך שבה את חושבת. עני על השאלות בכנות ובמילים שלך. אם שאלה אינה רלוונטית לך — כתבי זאת והמשיכי."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם עולם היזמות מעניין אותך? הסבירי מה מושך אותך בתחום.",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q2",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם יש לך אוריינטציה טכנולוגית? הסבירי במה זה מתבטא.",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q3",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם את מכירה את עולמות ה-AI? ספרי בקצרה מה את יודעת עליהם.",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q4",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "איך היית מנגישה את עולם ה-AI לנערות בכפרי נוער? תארי רעיון או דרך.",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q5",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם את מכירה כלי vibe coding? (אם כן, פירוט בשאלה הבאה.)",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q6",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "אם כן — אילו כלים את מכירה?",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q7",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם פיתחת אפליקציה / אתר / כלי טכנולוגי אחר בעזרת vibe coding?",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q8",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "אם כן — תארי בקצרה את הכלי במשפט, וכמה פיצ'רים (יכולות) שיש בו.",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q9",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "האם את מכירה את המונח prompt engineering (הנדסת פרומטים)?",
+      "rubric": ["relevance", "clarity", "depth"]
+    },
+    {
+      "id": "q10",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "אם כן — תני דוגמה לפרומט שהיית כותבת באחד מכלי ה-AI, למשימה הבאה: לבנות אפליקציה שמטרתה שבכל סוף שבוע יגיעו מתנדבים לנקות את חופי הים בישראל (הנושא: זיהום חופי הים). תמצאי את הדרך…",
+      "rubric": ["relevance", "clarity", "depth"]
+    }
+  ],
+  "variants": []
+}

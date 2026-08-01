@@ -387,10 +387,21 @@ window.AdminApp = (function () {
           '<span style="flex:1"></span>' +
           '<button class="btn ghost small" data-x="edit">ערוך שם/קוד</button></div>';
 
+    // שאלון ההצהרה (דיווח עצמי) — מוצג לבוחן אם מולא
+    var declHtml = '';
+    var d = e.declaration;
+    if (d && typeof d === 'object' && !Array.isArray(d)) {
+      var dsubs = Array.isArray(d.subjects) ? d.subjects : [];
+      var parts = [];
+      if (dsubs.length) parts.push('מקצועות שהוצהרו: ' + esc(dsubs.join(', ')) + (d.mathLevel ? ' · מתמטיקה ' + esc(d.mathLevel) + ' יח״ל' : ''));
+      if (d.note) parts.push('הערה: ' + esc(d.note));
+      if (parts.length) declHtml = '<div style="font-size:13px;color:var(--muted);margin-top:10px;background:rgba(255,255,255,.03);border:1px solid var(--border);border-radius:8px;padding:9px 13px"><b style="color:var(--faint)">שאלון הצהרה</b> — ' + parts.join(' · ') + '</div>';
+    }
+
     m.innerHTML = '<div class="modal-card">' +
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><h2 style="margin:0;font-size:20px">' + esc(e.name) + '</h2><span style="flex:1"></span><button class="btn ghost small" id="card-close">סגור</button></div>' +
-      meta +
-      '<div style="font-size:13px;color:var(--muted)">מסלול</div><div class="timeline">' + (tl || '<span style="color:var(--faint)">—</span>') + '</div>' +
+      meta + declHtml +
+      '<div style="font-size:13px;color:var(--muted);margin-top:12px">מסלול</div><div class="timeline">' + (tl || '<span style="color:var(--faint)">—</span>') + '</div>' +
       '<div style="font-size:13px;color:var(--muted);margin-top:12px">טיפול פרטני (לא משפיע על שאר הכיתה)</div>' +
       '<div class="mc-actions">' + actions + '</div></div>';
     document.getElementById('card-close').onclick = closeCard;

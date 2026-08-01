@@ -25,7 +25,7 @@
     token: localStorage.getItem('yh_token') || null,
     view: 'login',
     subjectsAvailable: [],
-    reg: { name: '', code: '', declaration: {}, subjects: [], math_level: '5' },
+    reg: { name: '', code: '', declaration: { subjects: [], mathLevel: null, note: '' }, subjects: [], math_level: '5' },
     state: null,
     renderedKey: null,
     timer: { state: 'none', remaining: 0, syncAt: 0 },
@@ -145,6 +145,7 @@
   // ---------------------------------------------------------------- ניתוב תצוגה
   function render() {
     if (App.view === 'login') return renderLogin();
+    if (App.view === 'instructions') return renderInstructions();
     if (App.view === 'declaration') return renderDeclaration();
     if (App.view === 'subjects') return renderSubjects();
     if (App.view === 'exam') return renderExam();
@@ -199,29 +200,93 @@
     } catch (e) {
       if (e.status !== 404) { errBox.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; return; }
     }
-    // נבחן חדש → ממשיכים לשאלון ההצהרה
-    App.view = 'declaration'; render();
+    // נבחן חדש → קודם מסך הוראות, ואז שאלון ההצהרה
+    App.view = 'instructions'; render();
   }
+
+  // ---------------------------------------------------------------- מסך הוראות
+  function renderInstructions() {
+    root.className = 'wrap';
+    root.innerHTML = '';
+    root.appendChild(el(
+      '<div class="card">' + BRAND +
+      '<div class="step-dots"><i class="active"></i><i></i><i></i></div>' +
+      '<h2>לפני שמתחילים — הוראות קצרות</h2>' +
+      '<p class="lead">קחו רגע לקרוא. אין כאן מה להילחץ — יום ההערכה נועד להכיר אתכם, לא לתפוס אתכם.</p>' +
+
+      '<div class="info-block"><h3>מה מטרת היום?</h3>' +
+      '<p>אנחנו לא בודקים כמה חומר אתם יודעים בעל־פה. אנחנו רוצים לראות <b>איך אתם חושבים, מסבירים ומנגישים חומר לאחרים</b>. אין תשובה אחת "נכונה", ואי־אפשר "להיכשל" — פשוט תהיו עצמכם.</p></div>' +
+
+      '<div class="info-block"><h3>דף ההצהרה</h3>' +
+      '<p>מיד אחרי המסך הזה תגיעו לדף הצהרה. תסמנו אילו מקצועות אתם מרגישים שאתם יכולים ללמד (ובמתמטיקה — באיזו רמה). זו <b>הצהרה בלבד</b> — לא מבחן, ולא מחייבת. יש שם גם מקום להערות חופשיות.</p></div>' +
+
+      '<div class="info-block"><h3>מבנה המבחן</h3>' +
+      '<p>5 סבבים קצרים: <b>3 מקצועות שתבחרו</b>, פרק <b>«מידע כללי»</b> (זהה לכולם), ו<b>ריאיון אישי</b>. לכל פרק כ־<b>20 דקות</b>. הבוחן פותח כל סבב בזמנו — אין צורך למהר.</p></div>' +
+
+      '<div class="info-block"><h3>פרק «מידע כללי»</h3>' +
+      '<p>בפרק הזה תקבלו <b>חומר חדש ופשוט שכולו מוסבר בתוך הקטע</b> — לא צריך שום ידע קודם. המשימה: להבין אותו, ואז להסביר אותו לתלמיד. זה בדיוק מה שאנחנו הכי רוצים לראות — את היכולת שלכם להנגיש.</p></div>' +
+
+      '<div class="info-block"><h3>אילו מקצועות דורשים ידע מוקדם?</h3>' +
+      '<p><b>דורשים ידע מוקדם:</b></p>' +
+      '<p>• <b>מתמטיקה</b> — אלגברה ופונקציות ברמת התיכון (לפי הרמה שבחרת: 3/4/5 יח״ל).<br>' +
+      '• <b>פיזיקה</b> — מכניקה וחשמל בסיסיים ברמת התיכון.<br>' +
+      '• <b>ביולוגיה/כימיה</b> — מושגי יסוד של התיכון בתחום.<br>' +
+      '• <b>מדעי המחשב</b> — יסודות תכנות וחשיבה אלגוריתמית.<br>' +
+      '• <b>אנגלית 5 יח״ל</b> — אוצר מילים והבנת הנקרא ברמה גבוהה.</p>' +
+      '<p><b>לא דורשים ידע מוקדם</b> — הכול מוסבר בתוך הקטע, ונבחנת בעיקר החשיבה וההסבר: «מידע כללי», לשון, רבי־מלל, רובוטיקה, ויזמות/גירלס פלוס.</p></div>' +
+
+      '<div class="info-block"><h3>שני כפתורים שכדאי להכיר</h3>' +
+      '<p><b>«החלף שאלה»</b> — אם נושא לא מתאים לכם, אפשר לקבל נושא אחר מאותו מקצוע.<br>' +
+      '<b>«לא יודע/ת»</b> — אם אינכם יודעים לענות על שאלה, סמנו אותה והמשיכו הלאה. זה לגמרי בסדר. הכול נשמר אוטומטית לאורך הדרך.</p></div>' +
+
+      '<div class="btn-row" style="margin-top:22px"><button class="btn" id="next">הבנתי, נמשיך ←</button></div>' +
+      '</div>'
+    ));
+    document.getElementById('next').onclick = function () { App.view = 'declaration'; render(); };
+  }
+
+  // רשימת המקצועות הקבועה לשאלון ההצהרה (דיווח עצמי — נפרד מהמקצועות שנבחנים בפועל)
+  var DECL_SUBJECTS = [
+    { key: 'מתמטיקה', label: 'מתמטיקה', hasLevel: true },
+    { key: 'פיזיקה', label: 'פיזיקה' },
+    { key: 'ביולוגיה/כימיה', label: 'ביולוגיה / כימיה' },
+    { key: 'מדעי המחשב', label: 'מדעי המחשב' },
+    { key: 'לשון', label: 'לשון' },
+    { key: 'רבי מלל', label: 'רבי מלל (היסטוריה, אזרחות, ספרות, תנ״ך)' },
+    { key: 'אנגלית 5 יח״ל', label: 'אנגלית 5 יח״ל' },
+    { key: 'אנגלית לחטיבת ביניים', label: 'אנגלית לחטיבת ביניים' },
+    { key: 'מדעים ורבי מלל לחטיבת ביניים', label: 'מדעים ורבי מלל לחטיבת ביניים' },
+    { key: 'מתמטיקה לחטיבת ביניים', label: 'מתמטיקה לחטיבת ביניים' },
+    { key: 'רובוטיקה', label: 'רובוטיקה' },
+    { key: 'גירלס פלוס ויזמות', label: 'גירלס פלוס ויזמות (בנות בלבד)' },
+  ];
 
   // ---------------------------------------------------------------- שאלון הצהרה
   function renderDeclaration() {
     root.className = 'wrap';
-    var rows = App.subjectsAvailable.map(function (s) {
-      var d = App.reg.declaration[s] || {};
-      return '<div class="qcard" style="padding:14px 18px">' +
-        '<label class="chip ' + (d.can ? 'selected' : '') + '" data-subj="' + esc(s) + '" style="margin-bottom:0">' +
-        (d.can ? '✓ ' : '') + esc(s) + '</label>' +
-        '<input type="text" class="decl-note" data-subj="' + esc(s) + '" placeholder="רמה / הערה (לא חובה)" ' +
-        'value="' + esc(d.note || '') + '" style="margin-top:10px;' + (d.can ? '' : 'opacity:.4') + '">' +
-        '</div>';
+    var decl = App.reg.declaration;
+    if (!decl || Array.isArray(decl)) decl = App.reg.declaration = { subjects: [], mathLevel: null, note: '' };
+    if (!Array.isArray(decl.subjects)) decl.subjects = [];
+    var chips = DECL_SUBJECTS.map(function (o) {
+      var sel = decl.subjects.indexOf(o.key) >= 0;
+      return '<div class="chip ' + (sel ? 'selected' : '') + '" data-subj="' + esc(o.key) + '" style="justify-content:flex-start">' +
+        (sel ? '✓ ' : '') + esc(o.label) + '</div>';
     }).join('');
+    var hasMath = decl.subjects.indexOf('מתמטיקה') >= 0;
+    var mathBox = hasMath ?
+      '<label class="field" style="margin-top:14px"><span>רמת מתמטיקה (בהצהרה)</span>' +
+      '<select id="decl-mathlvl">' +
+      ['5', '4', '3'].map(function (l) { return '<option value="' + l + '"' + (decl.mathLevel === l ? ' selected' : '') + '>' + l + ' יח״ל</option>'; }).join('') +
+      '</select></label>' : '';
     root.innerHTML = '';
     root.appendChild(el(
       '<div class="card">' + BRAND +
       '<div class="step-dots"><i></i><i class="active"></i><i></i></div>' +
       '<h2>שאלון הצהרה</h2>' +
-      '<p class="lead">סמנו אילו מקצועות אתם מאמינים שאתם יכולים ללמד, ובאיזו רמה. זהו שלב הצהרה בלבד.</p>' +
-      '<div class="chips" style="flex-direction:column;gap:10px">' + rows + '</div>' +
+      '<p class="lead">סמנו אילו מקצועות אתם מרגישים שאתם יכולים ללמד. זהו שלב הצהרה בלבד — לא מחייב.</p>' +
+      '<div class="chips" style="flex-direction:column;gap:10px;align-items:stretch">' + chips + '</div>' + mathBox +
+      '<label class="field" style="margin-top:18px"><span>הערות (לא חובה)</span>' +
+      '<textarea id="decl-note" rows="3" placeholder="משהו שחשוב שנדע? אפשר לכתוב כאן.">' + esc(decl.note || '') + '</textarea></label>' +
       '<div class="btn-row" style="margin-top:22px"><button class="btn" id="next">המשך לבחירת נושאים</button>' +
       '<button class="btn ghost" id="back">חזרה</button></div>' +
       '</div>'
@@ -229,19 +294,19 @@
     root.querySelectorAll('.chip[data-subj]').forEach(function (c) {
       c.onclick = function () {
         var s = c.getAttribute('data-subj');
-        var d = App.reg.declaration[s] || {};
-        d.can = !d.can; App.reg.declaration[s] = d; renderDeclaration();
+        var i = decl.subjects.indexOf(s);
+        if (i >= 0) decl.subjects.splice(i, 1);
+        else decl.subjects.push(s);
+        if (s === 'מתמטיקה' && decl.subjects.indexOf('מתמטיקה') >= 0 && !decl.mathLevel) decl.mathLevel = '5';
+        renderDeclaration();
       };
     });
-    root.querySelectorAll('.decl-note').forEach(function (inp) {
-      inp.oninput = function () {
-        var s = inp.getAttribute('data-subj');
-        App.reg.declaration[s] = App.reg.declaration[s] || {};
-        App.reg.declaration[s].note = inp.value;
-      };
-    });
+    var lvl = document.getElementById('decl-mathlvl');
+    if (lvl) lvl.onchange = function (e) { decl.mathLevel = e.target.value; };
+    var note = document.getElementById('decl-note');
+    if (note) note.oninput = function () { decl.note = note.value; };
     document.getElementById('next').onclick = function () { App.view = 'subjects'; render(); };
-    document.getElementById('back').onclick = function () { App.view = 'login'; render(); };
+    document.getElementById('back').onclick = function () { App.view = 'instructions'; render(); };
   }
 
   // ---------------------------------------------------------------- בחירת נושאים
@@ -250,8 +315,9 @@
     var chips = App.subjectsAvailable.map(function (s) {
       var idx = App.reg.subjects.indexOf(s);
       var sel = idx >= 0;
+      var label = s === 'יזמות גירלס פלוס' ? s + ' (בנות בלבד)' : s;
       return '<div class="chip ' + (sel ? 'selected' : '') + '" data-subj="' + esc(s) + '">' +
-        esc(s) + (sel ? ' <span class="order">#' + (idx + 1) + '</span>' : '') + '</div>';
+        esc(label) + (sel ? ' <span class="order">#' + (idx + 1) + '</span>' : '') + '</div>';
     }).join('');
     var hasMath = App.reg.subjects.indexOf('מתמטיקה') >= 0;
     var mathBox = hasMath ?
@@ -264,7 +330,7 @@
       '<div class="card">' + BRAND +
       '<div class="step-dots"><i></i><i></i><i class="active"></i></div>' +
       '<h2>בחירת נושאים</h2>' +
-      '<p class="lead">בחרו עד 4 מקצועות (הראשון שתבחרו הוא הנושא הראשי). אם תבחרו פחות מ-4, פרק אחד יחזור על הנושא הראשי.</p>' +
+      '<p class="lead">בחרו עד 3 מקצועות (הראשון שתבחרו הוא הנושא הראשי). בנוסף, פרק «מידע כללי» יינתן לכולם — כך שבסך הכול תעברו 4 פרקים וריאיון.</p>' +
       '<div id="err"></div>' +
       '<div class="chips">' + chips + '</div>' + mathBox +
       '<div class="btn-row" style="margin-top:24px"><button class="btn" id="start">התחל מבחן</button>' +
@@ -276,7 +342,7 @@
         var s = c.getAttribute('data-subj');
         var idx = App.reg.subjects.indexOf(s);
         if (idx >= 0) App.reg.subjects.splice(idx, 1);
-        else { if (App.reg.subjects.length >= 4) return; App.reg.subjects.push(s); }
+        else { if (App.reg.subjects.length >= 3) return; App.reg.subjects.push(s); }
         renderSubjects();
       };
     });
@@ -329,7 +395,7 @@
       App.state = s;
       App.online = true;
       if (App.view === 'exam') renderExam();
-      else if (App.view !== 'declaration' && App.view !== 'subjects') renderExam();
+      else if (App.view !== 'declaration' && App.view !== 'subjects' && App.view !== 'instructions') renderExam();
     } catch (e) { App.online = false; updateNetStatus(); /* שגיאת רשת זמנית — התור ימשיך לנסות */ }
   }
 
@@ -358,11 +424,11 @@
     if (!s) return;
     root.className = 'wrap';
 
-    // נבחן שנפתח לו משתמש מראש — משלים הצהרה ובחירת נושאים בעצמו
+    // נבחן שנפתח לו משתמש מראש — משלים הצהרה ובחירת נושאים בעצמו (דרך מסך ההוראות)
     if (s.phase === 'needs_setup') {
       App.reg.name = s.examinee.name; App.reg.code = s.examinee.code;
       App.completingSetup = true;
-      App.view = 'declaration';
+      if (App.view !== 'declaration' && App.view !== 'subjects') App.view = 'instructions';
       render();
       return;
     }
@@ -405,11 +471,14 @@
 
   function renderChapter(s) {
     var ch = s.chapter;
-    var savedMap = {};
-    (s.answers || []).forEach(function (a) { savedMap[a.item_id] = a.answer; });
+    var savedMap = {}, dkMap = {};
+    (s.answers || []).forEach(function (a) { savedMap[a.item_id] = a.answer; if (a.dont_know) dkMap[a.item_id] = true; });
     // שכבת ביטחון: העדפת ערך מקומי שממתין לשליחה (שלא ייעלם אם השרת עדיין לא קיבל)
     App.outbox.forEach(function (o) {
-      if (o.body.chapter_id === s.slot.chapter_id) savedMap[o.body.item_id] = o.body.answer;
+      if (o.body.chapter_id === s.slot.chapter_id) {
+        savedMap[o.body.item_id] = o.body.answer;
+        dkMap[o.body.item_id] = !!o.body.dont_know;
+      }
     });
     App.itemStart = {};
     var t = Date.now();
@@ -423,7 +492,7 @@
 
     var items = ch.items.map(function (it) {
       App.itemStart[it.id] = t;
-      return renderItem(it, savedMap[it.id]);
+      return renderItem(it, savedMap[it.id], !!dkMap[it.id]);
     }).join('');
 
     var name = (s.examinee && s.examinee.name) || '';
@@ -482,7 +551,7 @@
     text_teach_error: { t: 'זיהוי טעות והוראה · במילים', cls: 'teach' },
   };
 
-  function renderItem(it, saved) {
+  function renderItem(it, saved, marked) {
     var lbl = TYPE_LABEL[it.type] || { t: it.type, cls: '' };
     var head = '<span class="qtype ' + lbl.cls + '">' + lbl.t + '</span>';
     var body = '';
@@ -508,9 +577,11 @@
 
     var actions = '<div class="q-actions">' +
       '<button class="btn ghost small act-swap" data-item="' + esc(it.id) + '">החלף שאלה</button>' +
+      '<button class="btn ghost small act-dontknow" data-item="' + esc(it.id) + '">' + (marked ? 'בטל «לא יודע/ת»' : 'לא יודע/ת') + '</button>' +
+      '<span class="dk-badge" data-dk="' + esc(it.id) + '"' + (marked ? '' : ' style="display:none"') + '>נרשם: לא יודע/ת</span>' +
       '<span class="save-hint" data-hint="' + esc(it.id) + '"></span></div>';
 
-    return '<div class="qcard" data-type="' + esc(it.type) + '">' + head + body + actions + '</div>';
+    return '<div class="qcard' + (marked ? ' dk-marked' : '') + '" data-type="' + esc(it.type) + '">' + head + body + actions + '</div>';
   }
 
   function wireItems(s) {
@@ -538,6 +609,13 @@
     });
     // החלף שאלה — מעבר לנושא אחר מאותו מקצוע
     root.querySelectorAll('.act-swap').forEach(function (b) { b.onclick = function () { onSwap(round); }; });
+    // לא יודע/ת — סימון הפריט ומעבר לשאלה הבאה
+    root.querySelectorAll('.act-dontknow').forEach(function (b) {
+      b.onclick = function () {
+        var card = b.closest('.qcard');
+        onDontKnow(round, chapterId, b.getAttribute('data-item'), card ? card.getAttribute('data-type') : null, card);
+      };
+    });
   }
 
   function saveAnswer(round, chapterId, item, type, answer, spent) {
@@ -556,6 +634,35 @@
       if (r.swapped) { App.state = r.state; App.renderedKey = null; renderExam(); }
       else flash(r.message || 'אין שאלה חלופית כרגע.', 'warn');
     } catch (e) { flash(e.message, 'error'); }
+  }
+  // עדכון תצוגת "לא יודע/ת" על כרטיס פריט (בלי רינדור מחדש של כל הפרק)
+  function markDontKnow(card, marked) {
+    if (!card) return;
+    card.classList.toggle('dk-marked', marked);
+    var btn = card.querySelector('.act-dontknow');
+    if (btn) btn.textContent = marked ? 'בטל «לא יודע/ת»' : 'לא יודע/ת';
+    var badge = card.querySelector('.dk-badge');
+    if (badge) badge.style.display = marked ? '' : 'none';
+  }
+  // "לא יודע/ת" — סימון הפריט (או ביטול), שמירה עמידה דרך התור, ומעבר לשאלה הבאה
+  function onDontKnow(round, chapterId, itemId, type, card) {
+    var newMarked = !(card && card.classList.contains('dk-marked'));
+    if (newMarked && card) {
+      var ta = card.querySelector('.answer-text'); if (ta) ta.value = '';
+      card.querySelectorAll('.option.selected').forEach(function (o) { o.classList.remove('selected'); });
+      clearTimeout(App.saveTimers[itemId]);
+    }
+    enqueueSave({ round: round, chapter_id: chapterId, item_id: itemId, type: type, answer: '', time_spent_sec: 0, dont_know: newMarked ? 1 : 0 });
+    markDontKnow(card, newMarked);
+    setHint(itemId, newMarked ? 'נרשם: לא יודע/ת' : '');
+    if (newMarked && card) {
+      var next = card.nextElementSibling;
+      if (next && next.classList.contains('qcard')) {
+        try { next.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+        var input = next.querySelector('.answer-text, .option');
+        if (input && input.focus) { try { input.focus(); } catch (e) {} }
+      }
+    }
   }
   async function onNotComfortable(round) {
     try {
@@ -600,7 +707,7 @@
 
     var expired = rem <= 0 && !paused;
     var locked = paused || expired;
-    root.querySelectorAll('.answer-text, .option, .act-swap, .act-nc, #submit-slot').forEach(function (n) {
+    root.querySelectorAll('.answer-text, .option, .act-swap, .act-dontknow, #submit-slot').forEach(function (n) {
       if (locked) { n.setAttribute('disabled', 'disabled'); n.style.pointerEvents = 'none'; n.style.opacity = '0.55'; }
       else { n.removeAttribute('disabled'); n.style.pointerEvents = ''; n.style.opacity = ''; }
     });

@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS answers (
   started_at    INTEGER,
   updated_at    INTEGER,
   time_spent_sec INTEGER DEFAULT 0,
+  dont_know     INTEGER NOT NULL DEFAULT 0,  -- הנבחן/ת סימן/ה "לא יודע/ת" על הפריט
   PRIMARY KEY (code, chapter_id, item_id),
   FOREIGN KEY (code) REFERENCES examinees(code) ON DELETE CASCADE
 );
@@ -106,6 +107,8 @@ for (const alter of [
   'ALTER TABLE examinees ADD COLUMN in_interview INTEGER NOT NULL DEFAULT 0',
   // «קוד אישי» חופשי שהנבחן בוחר (לא ייחודי). המזהה הפנימי הקבוע נשאר בעמודת code.
   'ALTER TABLE examinees ADD COLUMN pin TEXT',
+  // סימון "לא יודע/ת" פר-פריט (כפתור חדש במסך הנבחן).
+  'ALTER TABLE answers ADD COLUMN dont_know INTEGER NOT NULL DEFAULT 0',
 ]) {
   try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
 }
