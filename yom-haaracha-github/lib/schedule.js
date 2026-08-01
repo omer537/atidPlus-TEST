@@ -93,23 +93,36 @@ function poolFor(subject, mathLevel) {
 }
 
 // רשימת הפרקים המסודרת של נבחן (לפי המקצועות שבחר), למודל החי.
-// מחזיר מערך של {subject, level, chapter_id}.
-// כשמקצוע חוזר (נבחרו פחות מ-3 → הראשי ממלא) — כל חזרה מקבלת וריאנט *אחר*,
-// עד גודל הפול. אם נגמרו הווריאנטים למקצוע — לא מוסיפים כפילות.
+// מחזיר מערך של {subject, level, chapter_id}: עד NUM_CHOSEN פרקי-מקצוע + «מידע כללי».
+// אם נבחרו פחות מ-NUM_CHOSEN, ממלאים סבב-סבב על המקצועות הנבחרים (כל פעם וריאנט חדש)
+// עד שמגיעים ל-NUM_CHOSEN או שנגמרו הווריאנטים. הפרק הכללי תמיד אחרון (חובה לכולם).
 function chapterListFor(subjects, mathLevel) {
-  const chapterSubjects = buildChapterSubjects(subjects);
+  const chosen = (subjects || []).filter((s) => s && s !== GENERAL_SUBJECT).slice(0, NUM_CHOSEN);
   const taken = {};
   const out = [];
-  for (const subject of chapterSubjects) {
-    const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
-    const pool = poolFor(subject, mathLevel);
-    const k = taken[subject] || 0;
-    if (k < pool.length) {
-      out.push({ subject, level, chapter_id: pool[k].chapter_id });
-      taken[subject] = k + 1;
+  let progressed = true;
+  while (out.length < NUM_CHOSEN && progressed) {
+    progressed = false;
+    for (const subject of chosen) {
+      if (out.length >= NUM_CHOSEN) break;
+      const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
+      const pool = poolFor(subject, mathLevel);
+      const k = taken[subject] || 0;
+      if (k < pool.length) {
+        out.push({ subject, level, chapter_id: pool[k].chapter_id });
+        taken[subject] = k + 1;
+        progressed = true;
+      }
     }
   }
+  const gen = poolFor(GENERAL_SUBJECT, null)[0];
+  if (gen) out.push({ subject: GENERAL_SUBJECT, level: null, chapter_id: gen.chapter_id });
   return out;
+}
+
+// כמה פרקי-מקצוע (בלי «מידע כללי») אפשר להרכיב מהבחירה — לאימות "אפשר 3 פרקים".
+function chosenChapterCount(subjects, mathLevel) {
+  return chapterListFor(subjects, mathLevel).filter((c) => c.subject !== GENERAL_SUBJECT).length;
 }
 
 // הפרק הבא שטרם נעשה (מתוך הרשימה), בהינתן קבוצת מזהי הפרקים שכבר הוגשו.
@@ -128,5 +141,6 @@ module.exports = {
   pickInterviewRound,
   buildPlan,
   chapterListFor,
+  chosenChapterCount,
   nextChapter,
 };

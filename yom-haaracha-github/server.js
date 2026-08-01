@@ -397,6 +397,9 @@ app.post('/api/register', (req, res) => {
     ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, schedule.NUM_CHOSEN) : [];
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
+  if (schedule.chosenChapterCount(chosenSubjects, mathLevel) < schedule.NUM_CHOSEN) {
+    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-3 פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
+  }
 
   const token = newToken();
   const internalCode = genCode();
@@ -420,6 +423,9 @@ app.post('/api/complete-setup', authExaminee, (req, res) => {
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const ex = req.examinee;
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
+  if (schedule.chosenChapterCount(chosenSubjects, mathLevel) < schedule.NUM_CHOSEN) {
+    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-3 פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
+  }
   db.prepare('UPDATE examinees SET subjects = ?, math_level = ?, declaration = ?, status = ? WHERE code = ?')
     .run(JSON.stringify(chosenSubjects), mathLevel, JSON.stringify(declaration || null), 'active', ex.code);
   // אין בניית slots מראש — נבנות חי בהתחלת סבב.
