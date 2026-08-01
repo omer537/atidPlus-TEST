@@ -194,14 +194,32 @@ function chapterListForEx(ex) {
 }
 
 // מה נבחן עושה בסבב נתון (מחושב בעת התחלת הסבב). מחזיר תיאור משבצת או null (idle).
+// מעקב לפי *כמות פרקים למקצוע* (ולא רק "נעשה/לא"): כך אפשר שמקצוע יחזור כמה פעמים
+// (כשנבחרו פחות מ-3 והראשי ממלא), והספירה-לפי-מקצוע עמידה ל"החלף שאלה" (החלפת וריאנט
+// אינה מוסיפה מקצוע). לכל חזרה נבחר וריאנט שטרם נעשה.
 function resolveActivity(ex, round) {
   if (isMarkedInterview(round, ex.code) && !hasInterviewed(ex.code)) {
     return { kind: 'interview', subject: null, level: null, chapter_id: null };
   }
   const list = chapterListForEx(ex);
-  const doneSubj = servedSubjects(ex.code, round);          // מקצועות שכבר קיבלו משבצת בסבבים אחרים
-  const next = list.find((c) => !doneSubj.has(c.subject));  // הפרק הבא ממקצוע שטרם נעשה
-  if (next) return { kind: 'chapter', subject: next.subject, level: next.level, chapter_id: next.chapter_id };
+  const servedRows = db.prepare("SELECT subject FROM slots WHERE code = ? AND kind = 'chapter' AND round != ?").all(ex.code, round);
+  const servedCount = {};
+  for (const r of servedRows) servedCount[r.subject] = (servedCount[r.subject] || 0) + 1;
+  const servedIds = servedChapterIds(ex.code, round);
+  const seen = {};
+  for (const c of list) {
+    const k = seen[c.subject] || 0;
+    seen[c.subject] = k + 1;
+    if (k < (servedCount[c.subject] || 0)) continue; // מופע זה של המקצוע כבר שובץ בסבב אחר
+    // מופע שטרם שובץ — נעדיף את הפרק המתוכנן; אם כבר נעשה (למשל אחרי החלפה) נבחר וריאנט אחר שטרם נעשה.
+    let chapterId = c.chapter_id;
+    if (servedIds.has(chapterId)) {
+      const alt = (content.bySubject.get(c.subject) || []).find((ch) =>
+        (c.subject !== 'מתמטיקה' || !c.level || String(ch.level) === String(c.level)) && !servedIds.has(ch.chapter_id));
+      if (alt) chapterId = alt.chapter_id;
+    }
+    return { kind: 'chapter', subject: c.subject, level: c.level, chapter_id: chapterId };
+  }
   return null; // אין פרק נותר — idle (צריך ריאיון או שסיים)
 }
 
@@ -281,8 +299,8 @@ function buildExamineeState(ex) {
 
   // סיים הכול (התראיין + כל הפרקים) — מסך סיום
   const chapterList = chapterListForEx(ex);
-  const done = doneChapterIds(ex.code);
-  const allChaptersDone = chapterList.length > 0 && chapterList.every((c) => done.has(c.chapter_id));
+  const doneChapterCount = db.prepare("SELECT COUNT(*) AS c FROM slots WHERE code = ? AND kind = 'chapter' AND status = 'done'").get(ex.code).c;
+  const allChaptersDone = chapterList.length > 0 && doneChapterCount >= chapterList.length;
   if (running === 0 && hasInterviewed(ex.code) && allChaptersDone) {
     state.phase = 'finished';
     state.message = 'סיימת את כל המשבצות — תודה רבה!';
@@ -651,6 +669,16 @@ app.post('/api/examiner/remove-examinee', authExaminer, (req, res) => {
   res.json({ ok: true });
 });
 
+// הסרת כל הנבחנים בבת אחת (מחיקה מלאה — slots/answers/interview_marks נמחקים ב-CASCADE).
+// תכנון הסבבים (טבלת rounds) נשמר. גיבוי אוטומטי לפני.
+app.post('/api/examiner/remove-all-examinees', authExaminer, (req, res) => {
+  makeBackup('pre-remove-all-examinees');
+  const n = db.prepare('SELECT COUNT(*) AS c FROM examinees').get().c;
+  db.prepare('DELETE FROM examinees').run();
+  logEvent(null, 'remove_all_examinees', String(n));
+  res.json({ ok: true, removed: n });
+});
+
 // עריכת שם / קוד אישי של נבחן (המנהל מתקן טעויות). המזהה הפנימי (code) לא משתנה — אין פגיעה בנתונים.
 app.post('/api/examiner/edit-examinee', authExaminer, (req, res) => {
   const { code, name, pin } = req.body || {};
@@ -848,23 +876,29 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
     const subjects = JSON.parse(ex.subjects || '[]');
     const setup = subjects.length > 0;
     const chapterList = setup ? chapterListForEx(ex) : [];
-    const doneSubj = doneSubjects(ex.code);
     const interviewed = hasInterviewed(ex.code);
     const slot = running ? getSlot(ex.code, running) : null;
     const timer = slot ? computeTimer(slot) : { state: 'none', remaining_sec: 0 };
     const answered = slot && slot.chapter_id
       ? db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?').get(ex.code, slot.chapter_id).c : 0;
     const flags = db.prepare("SELECT COUNT(*) AS c FROM events WHERE code = ? AND type IN ('blur','tabhide','paste_blocked')").get(ex.code).c;
-    const doneNames = [...new Set(chapterList.filter((c) => doneSubj.has(c.subject)).map((c) => c.subject))];
-    const remaining = [...new Set(chapterList
-      .filter((c) => !doneSubj.has(c.subject) && (!slot || slot.subject !== c.subject))
-      .map((c) => c.subject))];
+    // ספירת פרקים שהושלמו לפי מקצוע — עקבי עם מנוע השיבוץ (עמיד לחזרות ולהחלפות)
+    const doneCnt = {}; let doneTotal = 0;
+    db.prepare("SELECT subject FROM slots WHERE code = ? AND kind = 'chapter' AND status = 'done'").all(ex.code)
+      .forEach((r) => { doneCnt[r.subject] = (doneCnt[r.subject] || 0) + 1; doneTotal++; });
+    const seenS = {}; const doneNames = []; const remaining = [];
+    for (const c of chapterList) {
+      const k = seenS[c.subject] || 0; seenS[c.subject] = k + 1;
+      if (k < (doneCnt[c.subject] || 0)) doneNames.push(c.subject);
+      else remaining.push(c.subject);
+    }
+    if (slot && slot.kind === 'chapter') { const i = remaining.indexOf(slot.subject); if (i >= 0) remaining.splice(i, 1); }
     const current = slot ? {
       round: slot.round, kind: slot.kind, subject: slot.subject, level: slot.level,
       status: slot.status, not_comfortable: !!slot.not_comfortable,
     } : null;
     const left = ex.status === 'left';
-    const finished = setup && interviewed && chapterList.length > 0 && chapterList.every((c) => doneSubj.has(c.subject));
+    const finished = setup && interviewed && chapterList.length > 0 && doneTotal >= chapterList.length;
     return {
       code: ex.code, name: ex.name, pin: ex.pin || '', setup, subjects, left,
       declaration: JSON.parse(ex.declaration || 'null'),
@@ -893,8 +927,10 @@ app.get('/api/examiner/matrix', authExaminer, (req, res) => {
     const left = ex.status === 'left';
     const cells = new Array(N + 1).fill(null); // אינדקס 1..5
 
-    // מה כבר שובץ בפועל (בסבבים שהתחילו) — לחישוב הצפי לעתיד. לפי מקצוע (עקבי עם "החלף שאלה").
-    const servedSubj = servedSubjects(ex.code);             // כל מקצוע שכבר קיבל משבצת
+    // מה כבר שובץ בפועל (בסבבים שהתחילו) — לחישוב הצפי לעתיד. ספירה לפי מקצוע (עקבי עם "החלף שאלה" ועם חזרות).
+    const servedCnt = {};
+    db.prepare("SELECT subject FROM slots WHERE code = ? AND kind = 'chapter'").all(ex.code)
+      .forEach((r) => { servedCnt[r.subject] = (servedCnt[r.subject] || 0) + 1; });
     const hadInterviewSlot = !!db.prepare("SELECT 1 FROM slots WHERE code = ? AND kind = 'interview'").get(ex.code);
     let interviewedProjected = hasInterviewed(ex.code) || hadInterviewSlot;
 
@@ -913,8 +949,8 @@ app.get('/api/examiner/matrix', authExaminer, (req, res) => {
     }
 
     // שלב ב' — סבבים עתידיים (planned): צפי מלא לפי המקצועות שנותרו (ייחודי) + סימוני ריאיון.
-    const seenSubj = new Set(servedSubj);
-    const remaining = chapterList.filter((c) => { if (seenSubj.has(c.subject)) return false; seenSubj.add(c.subject); return true; });
+    const seenC = {};
+    const remaining = chapterList.filter((c) => { const k = seenC[c.subject] || 0; seenC[c.subject] = k + 1; return k >= (servedCnt[c.subject] || 0); });
     let pi = 0;
     for (let r = 1; r <= N; r++) {
       const rState = (roundsArr.find((x) => x.round === r) || {}).state || 'planned';

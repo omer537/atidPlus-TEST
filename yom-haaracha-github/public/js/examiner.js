@@ -121,8 +121,9 @@ window.AdminApp = (function () {
       // אזור מסוכן
       '<div class="card"><h2 class="section-title">פעולות כלליות</h2>' +
       '<div class="btn-row"><button class="btn danger small" id="btn-end-exam">סיים את המבחן (לכולם)</button>' +
-      '<button class="btn ghost small" id="btn-full-reset">אפס יום מלא (לחזרה גנרלית)</button></div>' +
-      '<p class="hint-text">"סיים את המבחן" מעביר את כל הנבחנים למסך סיום. "אפס יום מלא" מוחק את כל ההתקדמות והתשובות ומתחיל מאפס — שומר את רשימת הנבחנים והתכנון. להשתמש רק לפני היום או אחרי חזרה גנרלית.</p>' +
+      '<button class="btn ghost small" id="btn-full-reset">אפס יום מלא (לחזרה גנרלית)</button>' +
+      '<button class="btn danger small" id="btn-remove-all">הסר את כל הנבחנים</button></div>' +
+      '<p class="hint-text">"סיים את המבחן" מעביר את כל הנבחנים למסך סיום. "אפס יום מלא" מוחק את כל ההתקדמות והתשובות ומתחיל מאפס — שומר את רשימת הנבחנים והתכנון. <b>"הסר את כל הנבחנים"</b> מוחק לגמרי את כל הנבחנים והתשובות (משאיר רק את תכנון הסבבים). להשתמש רק לפני היום או אחרי חזרה גנרלית. לפני כל פעולה נוצר גיבוי אוטומטי.</p>' +
       '<div id="health"></div></div>' +
       '</div>'
     ));
@@ -137,6 +138,7 @@ window.AdminApp = (function () {
     document.getElementById('plan-load').onclick = loadPlan;
     document.getElementById('btn-end-exam').onclick = endExam;
     document.getElementById('btn-full-reset').onclick = fullReset;
+    document.getElementById('btn-remove-all').onclick = removeAllExaminees;
     document.getElementById('btn-autosplit').onclick = autosplit;
     var mt = document.getElementById('btn-matrix-toggle');
     if (mt) mt.onclick = function () { matrixHidden = !matrixHidden; this.textContent = matrixHidden ? 'הצג' : 'הסתר'; refresh(); };
@@ -223,7 +225,7 @@ window.AdminApp = (function () {
         if (e.current && e.current.kind === 'interview') interviewers.push(e);
         else if (e.current && e.current.kind === 'chapter') solvers.push(e);
       } else if (planningRound) {
-        if (e.setup && !e.interviewed && e.marked_rounds.indexOf(planningRound) >= 0) interviewers.push(e);
+        if (!e.interviewed && e.marked_rounds.indexOf(planningRound) >= 0) interviewers.push(e);
         else if (e.setup && !e.finished) solvers.push(e);
       }
     });
@@ -297,8 +299,7 @@ window.AdminApp = (function () {
 
     tb.innerHTML = rows.map(function (e) {
       var ivCell;
-      if (!e.setup) ivCell = '<span style="color:var(--faint);font-size:12px">טרם נרשם</span>';
-      else if (e.interviewed) ivCell = '<span style="color:var(--ok)">התראיין ✓</span>';
+      if (e.interviewed) ivCell = '<span style="color:var(--ok)">התראיין ✓</span>';
       else {
         var btns = '';
         for (var n = 1; n <= S.total_rounds; n++) {
@@ -459,6 +460,11 @@ window.AdminApp = (function () {
     if (!confirm('אפס יום מלא: למחוק את כל ההתקדמות והתשובות ולהתחיל מאפס? הנבחנים והתכנון יישמרו. (נוצר גיבוי לפני.)')) return;
     if (!confirm('בטוח? פעולה זו מוחקת את כל התשובות שנשמרו.')) return;
     try { await call('/examiner/full-reset', 'POST', {}); refresh(); } catch (e) { alert(e.message); }
+  }
+  async function removeAllExaminees() {
+    if (!confirm('להסיר את כל הנבחנים? כל הנבחנים, התשובות וההתקדמות יימחקו לצמיתות (תכנון הסבבים יישמר). נוצר גיבוי לפני.')) return;
+    if (!confirm('בטוח לגמרי? אי אפשר לבטל את הפעולה.')) return;
+    try { await call('/examiner/remove-all-examinees', 'POST', {}); refresh(); } catch (e) { alert(e.message); }
   }
 
   async function renderExamState() {

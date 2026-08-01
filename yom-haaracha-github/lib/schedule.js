@@ -85,15 +85,31 @@ function buildPlan({ subjects, mathLevel, interviewRound, seatIndex = 0 }) {
   return slots;
 }
 
+// הפול (רשימת הווריאנטים) של מקצוע, לפי סדר טעינה. במתמטיקה מסונן לפי רמה.
+function poolFor(subject, mathLevel) {
+  const list = content.bySubject.get(subject) || [];
+  const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
+  return level ? list.filter((c) => String(c.level) === String(level)) : list;
+}
+
 // רשימת הפרקים המסודרת של נבחן (לפי המקצועות שבחר), למודל החי.
 // מחזיר מערך של {subject, level, chapter_id}.
+// כשמקצוע חוזר (נבחרו פחות מ-3 → הראשי ממלא) — כל חזרה מקבלת וריאנט *אחר*,
+// עד גודל הפול. אם נגמרו הווריאנטים למקצוע — לא מוסיפים כפילות.
 function chapterListFor(subjects, mathLevel) {
   const chapterSubjects = buildChapterSubjects(subjects);
-  return chapterSubjects.map((subject) => {
+  const taken = {};
+  const out = [];
+  for (const subject of chapterSubjects) {
     const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
-    const ch = content.findChapter(subject, level, 0);
-    return { subject, level, chapter_id: ch ? ch.chapter_id : null };
-  }).filter((c) => c.chapter_id);
+    const pool = poolFor(subject, mathLevel);
+    const k = taken[subject] || 0;
+    if (k < pool.length) {
+      out.push({ subject, level, chapter_id: pool[k].chapter_id });
+      taken[subject] = k + 1;
+    }
+  }
+  return out;
 }
 
 // הפרק הבא שטרם נעשה (מתוך הרשימה), בהינתן קבוצת מזהי הפרקים שכבר הוגשו.
