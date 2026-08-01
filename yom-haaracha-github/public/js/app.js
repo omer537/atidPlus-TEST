@@ -240,8 +240,8 @@
       '<p><b>לא דורשים ידע מוקדם</b> — הכול מוסבר בתוך הקטע, ונבחנת בעיקר החשיבה וההסבר: «מידע כללי», לשון, רבי־מלל, ויזמות/גירלס פלוס.</p></div>' +
 
       '<div class="info-block"><h3>שני כפתורים שכדאי להכיר</h3>' +
-      '<p><b>«החלף שאלה»</b> — אם נושא לא מתאים לכם, אפשר לקבל נושא אחר מאותו מקצוע.<br>' +
-      '<b>«לא יודע/ת»</b> — אם אינכם יודעים לענות על שאלה, סמנו אותה והמשיכו הלאה. זה לגמרי בסדר. הכול נשמר אוטומטית לאורך הדרך.</p></div>' +
+      '<p><b>«החלף נושא»</b> — אם הנושא כולו לא מתאים לכם, אפשר להחליף לנושא אחר מאותו מקצוע. שימו לב: זה מחליף את <b>כל הפרק</b> (כל השאלות), לא שאלה בודדת.<br>' +
+      '<b>«לא יודע/ת»</b> — אם אינכם יודעים לענות על שאלה מסוימת, סמנו אותה והמשיכו הלאה. זה לגמרי בסדר. הכול נשמר אוטומטית לאורך הדרך.</p></div>' +
 
       '<div class="btn-row" style="margin-top:22px"><button class="btn" id="next">הבנתי, נמשיך ←</button></div>' +
       '</div>'
@@ -514,6 +514,8 @@
       '</div>' +
       '<div id="pause-banner" class="pause-banner hidden">המבחן הושהה על-ידי הבוחן. הטיימר עצר — המתן/י להמשך.</div>' +
       src +
+      '<div class="swap-bar"><span class="txt">הנושא לא מתאים? אפשר להחליף לנושא אחר באותו מקצוע — <b>כל הפרק יוחלף</b> (לא רק שאלה בודדת).</span>' +
+      '<button class="btn ghost small act-swap">החלף נושא</button></div>' +
       '<div id="items">' + items + '</div>' +
       '<div class="submit-bar">' +
       '<button class="btn big" id="submit-slot">הגש פרק</button>' +
@@ -580,7 +582,6 @@
     }
 
     var actions = '<div class="q-actions">' +
-      '<button class="btn ghost small act-swap" data-item="' + esc(it.id) + '">החלף שאלה</button>' +
       '<button class="btn ghost small act-dontknow" data-item="' + esc(it.id) + '">' + (marked ? 'בטל «לא יודע/ת»' : 'לא יודע/ת') + '</button>' +
       '<span class="dk-badge" data-dk="' + esc(it.id) + '"' + (marked ? '' : ' style="display:none"') + '>נרשם: לא יודע/ת</span>' +
       '<span class="save-hint" data-hint="' + esc(it.id) + '"></span></div>';
@@ -633,10 +634,11 @@
   }
 
   async function onSwap(round) {
+    if (!confirm('להחליף את כל הפרק לנושא אחר באותו מקצוע? כל השאלות בפרק הזה יוחלפו בחדשות — זו אינה החלפה של שאלה בודדת.')) return;
     try {
       var r = await API.call('/swap-question', 'POST', { round: round });
       if (r.swapped) { App.state = r.state; App.renderedKey = null; renderExam(); }
-      else flash(r.message || 'אין שאלה חלופית כרגע.', 'warn');
+      else flash(r.message || 'אין נושא חלופי זמין במקצוע זה כרגע.', 'warn');
     } catch (e) { flash(e.message, 'error'); }
   }
   // עדכון תצוגת "לא יודע/ת" על כרטיס פריט (בלי רינדור מחדש של כל הפרק)
