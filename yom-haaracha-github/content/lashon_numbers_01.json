@@ -15,7 +15,7 @@
       "id": "q1",
       "pair": "solve",
       "type": "mc_apply",
-      "stem": "איזה צירוף תקני?",
+      "stem": "איזה צירוף מספר–שם־עצם תקני?",
       "options": [
         { "id": "a", "text": "שְׁלוֹשָׁה ילדים", "correct": true },
         { "id": "b", "text": "שָׁלוֹשׁ ילדים", "correct": false },
@@ -55,7 +55,7 @@
       "id": "q3",
       "pair": "solve",
       "type": "mc_apply",
-      "stem": "איזה צירוף תקני?",
+      "stem": "איזה צירוף עם המספר 2 תקני?",
       "options": [
         { "id": "a", "text": "שְׁתֵּי בנות", "correct": true },
         { "id": "b", "text": "שְׁתַּיִם בנות", "correct": false },
