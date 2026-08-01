@@ -1,0 +1,76 @@
+{
+  "chapter_id": "lashon_tahbir_01",
+  "subject": "לשון",
+  "archetype": "decode",
+  "level": null,
+  "topic": "תחביר: סוגי המשפט ותפקידים",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "לשון — תחביר: סוגי המשפט ותפקידים",
+  "source": {
+    "type": "text_source",
+    "text": "משפט פשוט — נשוא אחד. משפט איחוי (מאוחה) — שני משפטים שכל אחד יכול לעמוד בפני עצמו, מחוברים ב-ו', \"אבל\", \"או\". משפט מורכב — משפט עיקרי ובתוכו פסוקית הפותחת במילת שעבוד (\"ש...\", \"כאשר\", \"מפני ש...\"), והפסוקית אינה יכולה לעמוד בפני עצמה. תפקידים תחביריים: נושא, נשוא, מושא, לוואי, תיאור. קשרים לוגיים: סיבה, תכלית, תנאי, ניגוד."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו סוג המשפט: \"כאשר הגיע האביב, הציפורים חזרו לקנן\"?",
+      "options": [
+        { "id": "a", "text": "משפט מורכב", "correct": true },
+        { "id": "b", "text": "משפט איחוי (מאוחה)", "correct": false },
+        { "id": "c", "text": "משפט פשוט", "correct": false },
+        { "id": "d", "text": "משפט כולל", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קבע שהמשפט הוא מאוחה, \"כי יש פסיק ושני חלקים\". אבחן את התפיסה השגויה והסבר לו את מבחן ההבחנה: האם כל חלק יכול לעמוד בפני עצמו כמשפט שלם — ולמה \"כאשר הגיע האביב\" אינו יכול.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "במשפט \"דנה קראה את הספר בגינה\", מהו התפקיד התחבירי של \"את הספר\"?",
+      "options": [
+        { "id": "a", "text": "מושא", "correct": true },
+        { "id": "b", "text": "נושא", "correct": false },
+        { "id": "c", "text": "נשוא", "correct": false },
+        { "id": "d", "text": "תיאור", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מתקשה למצוא את התפקידים במשפט. הסבר לו שיטה פשוטה לזהות קודם את הנשוא (הפועל) ואת הנושא (מי מבצע את הפעולה), ואיך זה עוזר אחר כך למצוא את שאר התפקידים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה קשר לוגי מבטא המשפט \"לא יצאנו לטיול מפני שירד גשם\"?",
+      "options": [
+        { "id": "a", "text": "סיבה", "correct": true },
+        { "id": "b", "text": "תכלית", "correct": false },
+        { "id": "c", "text": "תנאי", "correct": false },
+        { "id": "d", "text": "ניגוד", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טען שהמשפט מבטא תכלית (מטרה). אבחן את הבלבול והסבר לו את ההבדל: סיבה עונה על \"מדוע זה קרה?\" ותכלית עונה על \"לשם מה?\" — ותן דוגמה קצרה לכל אחת.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_4_regression_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "4",
+  "topic": "מתאם ורגרסיה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 3 יח\"ל",
+  "display_title": "מתמטיקה 4 יח\"ל — מתאם ורגרסיה",
+  "source": {
+    "type": "rule",
+    "text": "מקדם המתאם \\(r\\) נע בין \\(-1\\) ל-\\(1\\). הסימן מלמד על כיוון הקשר (חיובי או שלילי), והגודל (הקירבה ל-\\(1\\) או ל-\\(-1\\)) מלמד על חוזק הקשר הלינארי. ישר הרגרסיה משמש לניבוי \\(y\\) לפי \\(x\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נמצא \\(r=0.9\\). מה משמעות הדבר?",
+      "options": [
+        { "id": "a", "text": "קשר לינארי חיובי חזק", "correct": true },
+        { "id": "b", "text": "קשר לינארי שלילי חזק", "correct": false },
+        { "id": "c", "text": "אין קשר בין המשתנים", "correct": false },
+        { "id": "d", "text": "קשר חלש מאוד", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד הסיק מ-\\(r=0.9\\) ש\"המשתנה הראשון גורם לשני\". הסבר לו מה מקדם המתאם באמת מלמד, ומדוע מתאם גבוה אינו מעיד בהכרח על קשר של סיבה ותוצאה (תן דוגמה).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "ישר הרגרסיה לניבוי ההכנסה \\(y\\) לפי ההוצאה על פרסום \\(x\\) הוא \\(y=2x+5\\). מה הניבוי להכנסה כאשר \\(x=10\\)?",
+      "options": [
+        { "id": "a", "text": "25", "correct": true },
+        { "id": "b", "text": "20", "correct": false },
+        { "id": "c", "text": "15", "correct": false },
+        { "id": "d", "text": "2", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד לא מבין למה בכלל שימושי למצוא את ישר הרגרסיה. הסבר לו, בעזרת דוגמת ההוצאה וההכנסה, מה הישר הזה מאפשר לנו לעשות בפועל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "במחקר אחר התקבל \\(r=-0.85\\). מה משמעות הדבר?",
+      "options": [
+        { "id": "a", "text": "קשר לינארי שלילי חזק (ככל שאחד גדל, השני קטֵן)", "correct": true },
+        { "id": "b", "text": "קשר חיובי חזק", "correct": false },
+        { "id": "c", "text": "אין קשר בין המשתנים", "correct": false },
+        { "id": "d", "text": "טעות בחישוב — \\(r\\) לא יכול להיות שלילי", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד ראה \\(r=-0.85\\) וקבע \"זו טעות, כי מתאם לא יכול להיות שלילי\". הסבר לו מה מלמד הסימן של \\(r\\) ומה מלמד הגודל שלו, ומדוע מתאם שלילי הוא קשר חזק לגמרי.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

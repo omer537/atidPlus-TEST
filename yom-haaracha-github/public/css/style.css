@@ -283,6 +283,42 @@ table.grid tr:hover td { background: rgba(35, 179, 164, 0.05); }
 .health-list { font-size: 13px; color: var(--muted); }
 .health-list .ok { color: var(--ok); } .health-list .bad { color: var(--danger); }
 
+/* לוח תכנון — 5 עמודות */
+.plan-cols { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.plan-col { border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: rgba(8,14,36,0.35); min-height: 70px; }
+.plan-col.running { border-color: var(--accent-1); }
+.plan-col.ended { border-color: var(--ok); opacity: 0.75; }
+.plan-col .pc-head { display: flex; justify-content: space-between; font-weight: 700; font-size: 13px; margin-bottom: 8px; }
+.plan-col .pc-head small { color: var(--faint); font-weight: 400; }
+.plan-col.running .pc-head small { color: var(--accent-1); }
+.plan-col.ended .pc-head small { color: var(--ok); }
+.plan-col .chip-name { display: block; margin: 4px 0; }
+@media (max-width: 620px) { .plan-cols { grid-template-columns: 1fr 1fr; } }
+
+/* כפתורי סבב-ריאיון בטבלה */
+.rbtns { display: inline-flex; gap: 3px; }
+.rbtns button {
+  width: 26px; height: 26px; border-radius: 7px; cursor: pointer; font-size: 12px;
+  border: 1px solid var(--border); background: rgba(8,14,36,0.5); color: var(--muted);
+}
+.rbtns button.on { background: var(--accent-grad); color: #06231f; border-color: transparent; font-weight: 700; }
+.rbtns button:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* טריאז' — שורה שדורשת טיפול */
+tr.attn td { background: rgba(251,92,107,0.07); }
+tr.attn td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+tr.left-row td { opacity: 0.5; }
+
+/* כרטיס נבחן — מודאל */
+.modal-back { position: fixed; inset: 0; background: rgba(4,8,20,0.6); backdrop-filter: blur(4px); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal-card { background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: 16px; padding: 22px; max-width: 520px; width: 100%; box-shadow: var(--shadow); max-height: 90vh; overflow-y: auto; }
+.modal-card .mc-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: 8px; margin-top: 8px; }
+.timeline { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+.tl { font-size: 13px; padding: 5px 12px; border-radius: 999px; }
+.tl.done { background: rgba(69,184,78,0.12); color: var(--green); }
+.tl.now { background: rgba(35,179,164,0.14); color: var(--accent-1); border: 1px solid var(--border-strong); }
+.tl.pending { background: rgba(8,14,36,0.4); color: var(--faint); }
+
 /* קונסולת סבב */
 .round-strip { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
 .round-chip {
@@ -322,3 +358,34 @@ table.grid tr:hover td { background: rgba(35, 179, 164, 0.05); }
 .step-dots i.active { background: var(--accent-grad); }
 
 .hidden { display: none !important; }
+
+/* ------- מטריצה מלאה (נבחן × סבב) ------- */
+.matrix-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 4px 0 12px; }
+.matrix-legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; margin-inline-end: 5px; }
+table.matrix { border-collapse: separate; border-spacing: 6px; width: 100%; min-width: 640px; font-size: 13px; }
+table.matrix th { padding: 6px 4px; border-radius: 8px; background: rgba(120,150,210,0.08); color: var(--muted); font-weight: 600; }
+table.matrix th small { display: block; font-size: 10px; color: var(--faint); font-weight: 400; }
+table.matrix th.rc { background: #12332f; color: #6fe6d6; border: 1px solid var(--teal); }
+table.matrix th.rc small { color: var(--teal); }
+table.matrix td.nm { text-align: right; padding: 6px 8px; }
+table.matrix td.nm b { font-weight: 600; }
+table.matrix td.nm small { color: var(--faint); font-size: 11px; }
+.mx { padding: 9px 6px; text-align: center; border-radius: 8px; cursor: pointer; transition: transform .08s; }
+.mx:hover { transform: translateY(-1px); outline: 1px solid var(--border-strong); }
+.mx.done { background: rgba(69,184,78,0.10); }
+.mx.done .ck { color: var(--green); }
+.mx.current { background: #12332f; border: 1px solid var(--teal); color: #9ff0e4; font-weight: 600; }
+.mx.interview_done { background: rgba(120,150,210,0.14); color: #c8d0ff; }
+.mx.interview_current { background: #2a3570; color: #e6ebff; font-weight: 600; border: 1px solid #4a5bb0; }
+.mx.interview_future { background: transparent; border: 1px dashed #6b76b0; color: #b9c2ee; }
+.mx.predicted { background: transparent; border: 1px dashed var(--faint); color: var(--muted); }
+.mx.idle { background: rgba(120,150,210,0.05); color: var(--faint); cursor: default; }
+.mx.idle:hover { transform: none; outline: none; }
+tr.mx-left { opacity: .45; }
+
+/* ------- מחוון מצב רשת (שכבת ביטחון) ------- */
+.net-status { position: fixed; bottom: 0; inset-inline: 0; z-index: 80; text-align: center;
+  font-size: 13px; padding: 7px 12px; transition: transform .2s, opacity .2s; }
+.net-status.ok { transform: translateY(100%); opacity: 0; }
+.net-status.pending { background: rgba(35,179,164,0.16); color: #9ff0e4; border-top: 1px solid var(--teal); }
+.net-status.offline { background: rgba(251,92,107,0.18); color: #ffd7dc; border-top: 1px solid var(--danger); font-weight: 600; }

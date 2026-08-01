@@ -1,0 +1,76 @@
+{
+  "chapter_id": "lashon_morphology_01",
+  "subject": "לשון",
+  "archetype": "decode",
+  "level": null,
+  "topic": "מערכת הצורות: בניין ושורש",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "לשון — מערכת הצורות: בניין ושורש",
+  "source": {
+    "type": "text_source",
+    "text": "כל פועל בנוי משורש (בדרך כלל 3 עיצורים) שנוצק לבניין. שבעת הבניינים: קל (פָּעַל), נִפְעַל, פִּעֵל, פֻּעַל, הִפְעִיל, הֻפְעַל, הִתְפַּעֵל. חלק מהבניינים פעילים (מי שעושה) וחלק סבילים (מי שהפעולה נעשית עליו): הזוגות המובהקים פעיל–סביל הם פִּעֵל–פֻּעַל והִפְעִיל–הֻפְעַל. בניין נִפְעַל משמש לרוב כסביל או כחוזר של קל (למשל: נִכְתַּב, נִשְׁבַּר)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו הבניין של הפועל המודגש: \"המכתב נִכְתַּב אתמול\"?",
+      "options": [
+        { "id": "a", "text": "נִפְעַל", "correct": true },
+        { "id": "b", "text": "קל (פָּעַל)", "correct": false },
+        { "id": "c", "text": "פִּעֵל", "correct": false },
+        { "id": "d", "text": "הֻפְעַל", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טוען ש\"נכתב\" הוא בניין קל בעבר, \"עם נ' שנוספה בהתחלה\". אבחן את התפיסה השגויה והסבר לו שנִפְעַל הוא בניין נפרד (בדרך כלל סביל), שמזהים אותו לפי התבנית — ולא מוסיפים אותיות לבניין קל.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו השורש של המילה המודגשת: \"הוא מִשְׁתַּמֵּשׁ במילון\"?",
+      "options": [
+        { "id": "a", "text": "ש.מ.ש", "correct": true },
+        { "id": "b", "text": "מ.ש.מ.ש", "correct": false },
+        { "id": "c", "text": "ש.ת.מ", "correct": false },
+        { "id": "d", "text": "ת.מ.ש", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קבע שהשורש הוא מ.ש.ת.מ.ש — הוא כלל את ה-מ' של ההווה ואת ה-ת' של בניין הִתְפַּעֵל. אבחן את הטעות והסבר לו כיצד \"מקלפים\" את אותיות הבניין והזמן כדי לחשוף את שלושת עיצורי השורש.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו הבניין הסביל המקביל לבניין הפעיל פִּעֵל?",
+      "options": [
+        { "id": "a", "text": "פֻּעַל", "correct": true },
+        { "id": "b", "text": "הֻפְעַל", "correct": false },
+        { "id": "c", "text": "נִפְעַל", "correct": false },
+        { "id": "d", "text": "הִתְפַּעֵל", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד לא מבין מה זה \"בניין סביל\". הסבר לו את ההבדל בין פעיל לסביל — מי מבצע את הפעולה מול מי שהפעולה נעשית עליו — בעזרת זוג דוגמאות (למשל \"שיבח\" מול \"שובח\").",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

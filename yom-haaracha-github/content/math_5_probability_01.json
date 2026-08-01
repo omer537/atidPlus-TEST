@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_5_probability_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "5",
+  "topic": "הסתברות — ברנולי והסתברות מותנית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 4 יח\"ל",
+  "display_title": "מתמטיקה 5 יח\"ל — הסתברות (ברנולי)",
+  "source": {
+    "type": "rule",
+    "text": "ניסויי ברנולי: ההסתברות ל-\\(k\\) הצלחות בדיוק מתוך \\(n\\) ניסויים בלתי־תלויים היא \\(\\binom{n}{k}\\,p^{k}(1-p)^{\\,n-k}\\). הסתברות מותנית: \\(P(A\\mid B)=\\dfrac{P(A\\cap B)}{P(B)}\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מטילים מטבע הוגן 4 פעמים. מה ההסתברות לקבל בדיוק 2 פעמים \"עץ\"?",
+      "options": [
+        { "id": "a", "tex": "\\dfrac{3}{8}", "correct": true },
+        { "id": "b", "tex": "\\dfrac{1}{4}", "correct": false },
+        { "id": "c", "tex": "\\dfrac{1}{6}", "correct": false },
+        { "id": "d", "tex": "\\dfrac{1}{2}", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חישב את ההסתברות לקבל בדיוק 2 \"עץ\" ב-4 הטלות, וכתב \\(\\left(\\tfrac{1}{2}\\right)^{2}\\cdot\\left(\\tfrac{1}{2}\\right)^{2}\\) בלבד — בלי המקדם \\(\\binom{4}{2}\\). הסבר לו, בעזרת דוגמה קטנה, מה הוא שכח לספור ומדוע חסר לו המקדם.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נתון \\(P(A\\cap B)=0.2\\) ו-\\(P(B)=0.5\\). מהי ההסתברות המותנית \\(P(A\\mid B)\\)?",
+      "options": [
+        { "id": "a", "text": "0.4", "correct": true },
+        { "id": "b", "text": "0.2", "correct": false },
+        { "id": "c", "text": "0.1", "correct": false },
+        { "id": "d", "text": "0.7", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד פתר תרגיל והניח בדרך ש-\\(P(A\\mid B)\\) שווה תמיד ל-\\(P(B\\mid A)\\). זהה את הטעות והסבר לו, בעזרת דוגמה יומיומית (למשל: \"רטוב בחוץ\" מול \"יורד גשם\"), מדוע שתי ההסתברויות בדרך כלל אינן שוות.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "בקופסה, ההסתברות להוציא כדור אדום היא \\(0.3\\). מוציאים כדור, מחזירים אותו, ומוציאים כדור נוסף (עם החזרה). מה ההסתברות ששני הכדורים אדומים?",
+      "options": [
+        { "id": "a", "text": "0.09", "correct": true },
+        { "id": "b", "text": "0.3", "correct": false },
+        { "id": "c", "text": "0.6", "correct": false },
+        { "id": "d", "text": "0.18", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד פתר את אותו תרגיל בלי החזרה (לא החזיר את הכדור), אבל הכפיל \\(0.3\\cdot 0.3\\) בדיוק כמו במקרה עם החזרה. הסבר לו מהם \"מאורעות בלתי־תלויים\", ומדוע ההחזרה היא זו שקובעת אם מותר להכפיל את אותן הסתברויות.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

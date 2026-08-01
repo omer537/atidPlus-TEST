@@ -1,0 +1,76 @@
+{
+  "chapter_id": "english_reading_01",
+  "subject": "אנגלית",
+  "archetype": "decode",
+  "level": null,
+  "topic": "Reading comprehension",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "אנגלית — הבנת הנקרא",
+  "source": {
+    "type": "text_source",
+    "text": "Many people believe that eating late at night causes weight gain. However, recent studies suggest that it is not when you eat, but how much you eat in total, that matters most. Still, late-night snacks are often high in calories, which may explain why the belief is so common."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "What is the main point of the passage?",
+      "options": [
+        { "id": "a", "text": "The total amount you eat matters more than the time you eat.", "correct": true },
+        { "id": "b", "text": "Eating late at night always causes weight gain.", "correct": false },
+        { "id": "c", "text": "People should never eat at night.", "correct": false },
+        { "id": "d", "text": "Scientific studies cannot be trusted.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בחר \"אכילה מאוחרת תמיד גורמת לעלייה במשקל\" — בדיוק הדעה שהכותב חולק עליה. אבחן מדוע תלמיד עלול \"לתפוס\" את הרעיון שמופיע בתחילת הפסקה ולפספס את עמדת הכותב, והסבר כיצד מזהים את הרעיון המרכזי.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "The word \"However\" at the start of the second sentence signals that the writer is about to:",
+      "options": [
+        { "id": "a", "text": "present a contrasting idea.", "correct": true },
+        { "id": "b", "text": "give an example.", "correct": false },
+        { "id": "c", "text": "repeat the first idea.", "correct": false },
+        { "id": "d", "text": "end the passage.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד מדוע שימת לב למילות קישור כמו however, but, still עוזרת לו לעקוב אחרי הטיעון של הכותב — מה כל אחת מהן \"מסמנת\" שעומד לקרות במשפט הבא.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "Why does the writer mention that late-night snacks are often high in calories?",
+      "options": [
+        { "id": "a", "text": "To explain why the common belief exists.", "correct": true },
+        { "id": "b", "text": "To prove that eating late is dangerous.", "correct": false },
+        { "id": "c", "text": "To recommend healthy snacks.", "correct": false },
+        { "id": "d", "text": "To show that the studies are wrong.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שהמשפט האחרון סותר את המחקרים שהוזכרו קודם. אבחן את אי-ההבנה, והסבר לו כיצד המשפט האחרון דווקא משתלב עם עמדת הכותב ומסביר מניין הגיעה האמונה הרווחת.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

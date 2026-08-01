@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_4_normal_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "4",
+  "topic": "התפלגות נורמלית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 3 יח\"ל",
+  "display_title": "מתמטיקה 4 יח\"ל — התפלגות נורמלית",
+  "source": {
+    "type": "rule",
+    "text": "בהתפלגות נורמלית הנתונים מתפלגים סימטרית סביב הממוצע. ציון התקן הוא \\(z=\\dfrac{x-\\mu}{\\sigma}\\): \\(x\\) הערך הנבדק, \\(\\mu\\) הממוצע, \\(\\sigma\\) סטיית התקן. הוא מודד בכמה סטיות תקן רחוק הערך מן הממוצע."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "הממוצע \\(\\mu=64\\) וסטיית התקן \\(\\sigma=8\\). מהו ציון התקן של הערך \\(x=80\\)?",
+      "options": [
+        { "id": "a", "tex": "z=2", "correct": true },
+        { "id": "b", "tex": "z=1", "correct": false },
+        { "id": "c", "tex": "z=-2", "correct": false },
+        { "id": "d", "tex": "z=\\tfrac{1}{2}", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קיבל ש-\\(z=2\\) אך לא מבין מה זה אומר. הסבר לו במילים פשוטות מה המשמעות של \"שתי סטיות תקן מעל הממוצע\" — מה זה מלמד על הערך \\(80\\) ביחס לשאר הנתונים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "שני תלמידים קיבלו 90. בכיתה א' \\(\\mu=70,\\ \\sigma=10\\); בכיתה ב' \\(\\mu=75,\\ \\sigma=5\\). אצל מי ההישג יוצא דופן יותר יחסית לכיתתו?",
+      "options": [
+        { "id": "a", "text": "כיתה ב' (\\(z=3\\) מול \\(z=2\\))", "correct": true },
+        { "id": "b", "text": "כיתה א'", "correct": false },
+        { "id": "c", "text": "שווה בשתיהן", "correct": false },
+        { "id": "d", "text": "אי אפשר לדעת בלי כל הציונים", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טוען ש\"שני התלמידים שווים כי שניהם קיבלו 90\". הסבר לו מדוע כדי להשוות הישג בין שתי כיתות שונות צריך להתחשב גם בממוצע וגם בסטיית התקן, ולא רק בציון עצמו.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נתון \\(\\mu=64\\) וכי \\(P(x<55)=0.326\\). הערכים 55 ו-73 נמצאים במרחק שווה (9) מן הממוצע. מהי \\(P(x>73)\\)?",
+      "options": [
+        { "id": "a", "text": "0.326", "correct": true },
+        { "id": "b", "text": "0.674", "correct": false },
+        { "id": "c", "text": "0.5", "correct": false },
+        { "id": "d", "text": "0.163", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש-\\(P(x>73)=1-0.326\\). הסבר לו, בעזרת הסימטריה של העקומה סביב הממוצע, מדוע דווקא \\(P(x>73)\\) שווה ל-\\(P(x<55)\\).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,76 @@
+{
+  "chapter_id": "biology_enzymes_01",
+  "subject": "ביולוגיה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "אנזימים",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · מיסקונספציות",
+  "display_title": "ביולוגיה — אנזימים",
+  "source": {
+    "type": "text_source",
+    "text": "אנזים הוא חלבון המשמש זרז — מאיץ תגובה כימית בגוף. לכל אנזים מבנה מרחבי המתאים למצע מסוים בלבד (\"מפתח ומנעול\"), ולכן הוא ספציפי. האנזים אינו מתכלה בתגובה — הוא משתחרר ומשמש שוב. פעילותו תלויה בטמפרטורה וברמת החומציות: יש תחום מיטבי, ומעליו האנזים מאבד את צורתו."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה קורה לאנזים לאחר שהאיץ תגובה?",
+      "options": [
+        { "id": "a", "text": "הוא משתחרר ויכול לשמש שוב", "correct": true },
+        { "id": "b", "text": "הוא מתכלה ונעלם בתגובה", "correct": false },
+        { "id": "c", "text": "הוא הופך למצע", "correct": false },
+        { "id": "d", "text": "הוא הופך לתוצר", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שהאנזים \"מתכלה\" בתגובה כמו חומר מגיב רגיל. אבחן את התפיסה והסבר לו מה זה זרז — מדוע מעט אנזים יכול להאיץ כמות גדולה של תגובות שוב ושוב.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מדוע אנזים מסוים פועל בדרך כלל רק על מצע אחד?",
+      "options": [
+        { "id": "a", "text": "בגלל התאמה מרחבית בין צורת האנזים לצורת המצע", "correct": true },
+        { "id": "b", "text": "כי הוא פועל על כל חומר במקרה", "correct": false },
+        { "id": "c", "text": "כי הוא הגדול ביותר בתא", "correct": false },
+        { "id": "d", "text": "כי המצע בוחר את האנזים", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד את מושג הספציפיות של אנזים בעזרת דימוי \"מפתח ומנעול\": מדוע רק מצע בעל צורה מתאימה \"נכנס\" לאתר הפעיל של האנזים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה קורה לפעילות אנזים בטמפרטורה גבוהה מאוד (הרבה מעל המיטבית)?",
+      "options": [
+        { "id": "a", "text": "האנזים מאבד את צורתו ומפסיק לפעול", "correct": true },
+        { "id": "b", "text": "פעילותו גדֵלה ללא הגבלה", "correct": false },
+        { "id": "c", "text": "שום דבר לא משתנה", "correct": false },
+        { "id": "d", "text": "הוא הופך למצע", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"ככל שחם יותר, האנזים תמיד עובד מהר יותר\". אבחן את התפיסה והסבר לו מדוע יש טמפרטורה מיטבית, ומעליה החום פוגע במבנה האנזים ומשבית אותו.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

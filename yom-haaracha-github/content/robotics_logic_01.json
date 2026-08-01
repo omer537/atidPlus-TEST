@@ -1,0 +1,76 @@
+{
+  "chapter_id": "robotics_logic_01",
+  "subject": "רובוטיקה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "לוגיקת תכנות: לולאות ותנאים",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (ז'–ט')",
+  "display_title": "רובוטיקה — לוגיקת תכנות",
+  "source": {
+    "type": "text_source",
+    "text": "לולאה מריצה שוב ושוב את ההוראות שבתוכה. תנאי (\"אם\") מריץ הוראה רק כאשר הוא מתקיים. \"חזור עד ש...\" בודק את התנאי בכל סבב, וממשיך עד שהתנאי מתקיים. ההוראות מתבצעות לפי הסדר שנכתבו."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נתונה התוכנית: «חזור 3 פעמים → סע קדימה 10 ס\"מ». מה המרחק הכולל שהרובוט יסע?",
+      "options": [
+        { "id": "a", "text": "30 ס\"מ", "correct": true },
+        { "id": "b", "text": "10 ס\"מ", "correct": false },
+        { "id": "c", "text": "3 ס\"מ", "correct": false },
+        { "id": "d", "text": "13 ס\"מ", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שההוראה שבתוך הלולאה מתבצעת פעם אחת בלבד, ולכן ענה \"10 ס\"מ\". אבחן את הטעות והסבר לו מה בדיוק \"חוזר\" בלולאה ומדוע הפעולה מתבצעת שלוש פעמים.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נתונה התוכנית: «חזור עד שחיישן המגע נלחץ → סע קדימה». מתי הרובוט יפסיק לנסוע?",
+      "options": [
+        { "id": "a", "text": "כאשר חיישן המגע נלחץ", "correct": true },
+        { "id": "b", "text": "מיד, בלי לזוז", "correct": false },
+        { "id": "c", "text": "אף פעם לא יפסיק", "correct": false },
+        { "id": "d", "text": "אחרי 3 שניות קבועות", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד כיצד עובד \"חזור עד ש...\": שהרובוט בודק את התנאי שוב ושוב בכל סבב, ממשיך כל עוד התנאי אינו מתקיים, ועוצר ברגע שהוא מתקיים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "«סע קדימה ואז פְּנה ימינה» לעומת «פְּנה ימינה ואז סע קדימה». מה נכון?",
+      "options": [
+        { "id": "a", "text": "הרובוט יגיע למקומות שונים — הסדר משנה", "correct": true },
+        { "id": "b", "text": "התוצאה זהה — הסדר לא משנה", "correct": false },
+        { "id": "c", "text": "הרובוט לא יזוז בשני המקרים", "correct": false },
+        { "id": "d", "text": "רק הראשונה תקינה", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בטוח ש\"הסדר של ההוראות לא משנה, כי הן אותן פעולות\". אבחן את התפיסה והסבר לו — בעזרת דוגמת ה\"סע ופְנה\" — מדוע הרובוט מבצע הוראות לפי הסדר, וסדר שונה מוביל למסלול שונה.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

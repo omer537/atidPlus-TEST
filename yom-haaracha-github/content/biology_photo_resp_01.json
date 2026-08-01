@@ -1,0 +1,76 @@
+{
+  "chapter_id": "biology_photo_resp_01",
+  "subject": "ביולוגיה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "פוטוסינתזה ונשימה תאית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · מיסקונספציות",
+  "display_title": "ביולוגיה — פוטוסינתזה ונשימה תאית",
+  "source": {
+    "type": "text_source",
+    "text": "פוטוסינתזה: פחמן דו־חמצני + מים + אור → סוכר + חמצן. נשימה תאית: סוכר + חמצן → אנרגיה + פחמן דו־חמצני + מים. פוטוסינתזה מתרחשת בצמחים (בנוכחות אור) ובונה סוכר. נשימה תאית מתרחשת בכל היצורים החיים — כולל צמחים — ומפרקת סוכר לצורך אנרגיה, ביום ובלילה."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו המקור העיקרי לחומר (המסה) שממנו הצמח בונה את גופו?",
+      "options": [
+        { "id": "a", "text": "פחמן דו־חמצני מן האוויר", "correct": true },
+        { "id": "b", "text": "מינרלים מוצקים מן האדמה", "correct": false },
+        { "id": "c", "text": "המים בלבד", "correct": false },
+        { "id": "d", "text": "אור השמש שנבלע והפך לחומר", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד משוכנע ש\"הצמח אוכל מן האדמה\", ולכן כל גופו בא מהקרקע. אבחן את התפיסה השגויה הזו (מהמפורסמות בביולוגיה) והסבר לו — לפי משוואת הפוטוסינתזה — מהיכן מגיע רוב החומר שממנו נבנה הצמח.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "האם צמח מבצע נשימה תאית?",
+      "options": [
+        { "id": "a", "text": "כן — כל הזמן, ביום ובלילה", "correct": true },
+        { "id": "b", "text": "לא — צמח מבצע רק פוטוסינתזה", "correct": false },
+        { "id": "c", "text": "רק בלילה, כשאין אור", "correct": false },
+        { "id": "d", "text": "רק כשהוא נובל", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"צמחים רק מבצעים פוטוסינתזה, ובעלי חיים רק נושמים\". אבחן את התפיסה והסבר לו מדוע גם הצמח חייב לבצע נשימה תאית כדי להפיק אנרגיה מן הסוכר שהוא ייצר.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה מן התהליכים פולט חמצן לסביבה?",
+      "options": [
+        { "id": "a", "text": "פוטוסינתזה", "correct": true },
+        { "id": "b", "text": "נשימה תאית", "correct": false },
+        { "id": "c", "text": "שני התהליכים במידה שווה", "correct": false },
+        { "id": "d", "text": "אף אחד מהם", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מחליף בין הגזים וחושב שהנשימה היא שפולטת חמצן. הסבר לו, בעזרת שתי המשוואות, מי צורך ומי פולט חמצן ופחמן דו־חמצני — ואיך אפשר לזכור זאת בלי להתבלבל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,5 +1,8 @@
 {
-  "_הסבר": "כדי להפעיל בדיקת AI אמיתית: העתק/י קובץ זה לשם config.local.json, והדבק/י את מפתח ה-API שלך במקום הכוכביות. בלי הקובץ הזה, בדיקת ה-AI רצה במצב הדגמה.",
+  "_הסבר": "העתק/י קובץ זה לשם config.local.json ומלא/י את הערכים. הקובץ config.local.json לא נשמר ב-git.",
+  "_apiKey": "מפתח Claude API לבדיקת AI אמיתית. בלי מפתח — בדיקת ה-AI רצה במצב הדגמה.",
   "apiKey": "sk-ant-**********************",
-  "model": "claude-sonnet-5"
+  "model": "claude-sonnet-5",
+  "_sheetsWebhookUrl": "כתובת ה-Web App של Google Apps Script (ראה/י docs/google-sheets-setup.md). ריק/חסר = לא נשלח שום דבר החוצה.",
+  "sheetsWebhookUrl": ""
 }

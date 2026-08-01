@@ -1,0 +1,76 @@
+{
+  "chapter_id": "english_conditionals_01",
+  "subject": "אנגלית",
+  "archetype": "decode",
+  "level": null,
+  "topic": "Conditionals (first & second)",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "אנגלית — Conditionals (משפטי תנאי)",
+  "source": {
+    "type": "rule",
+    "text": "First conditional (real): If + present simple, ... will + verb. — If it rains, we will stay home. Second conditional (unreal / imaginary): If + past simple, ... would + verb. — If I had a car, I would drive. Note: never use \"will\" or \"would\" inside the if-clause."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "Which sentence is correct?",
+      "options": [
+        { "id": "a", "text": "If it rains, we will stay home.", "correct": true },
+        { "id": "b", "text": "If it will rain, we will stay home.", "correct": false },
+        { "id": "c", "text": "If it would rain, we will stay home.", "correct": false },
+        { "id": "d", "text": "If it rain, we will stay home.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד כותב שוב ושוב \"If I will have time, I will call you.\" אבחן את התפיסה השגויה שלו, והסבר לו — בלי לתת את המשפט המתוקן — מדוע will לא שייך לפסוקית ה-if.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "Which sentence describes an imaginary situation (not a real plan)?",
+      "options": [
+        { "id": "a", "text": "If I won a million dollars, I would travel the world.", "correct": true },
+        { "id": "b", "text": "If I finish work early, I will go home.", "correct": false },
+        { "id": "c", "text": "If it rains tomorrow, we will cancel the trip.", "correct": false },
+        { "id": "d", "text": "When I grow up, I will be a teacher.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד לא מבין את ההבדל בין \"If I have time, I will help\" לבין \"If I had time, I would help.\" הסבר לו מה משתנה במשמעות בין השניים — לא בצורה, אלא במה שהדובר מתכוון לומר.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "Which sentence has a mistake?",
+      "options": [
+        { "id": "a", "text": "If he would call me, I would answer.", "correct": true },
+        { "id": "b", "text": "If she studies, she will pass the test.", "correct": false },
+        { "id": "c", "text": "If I had more money, I would buy a bike.", "correct": false },
+        { "id": "d", "text": "If they leave now, they will arrive on time.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שהמשפט \"If I had a car, I would drive\" מדבר על העבר (\"פעם היה לי אוטו\"). אבחן את הטעות והסבר לו מדוע דווקא צורת העבר משמשת כאן כדי לתאר מצב דמיוני בהווה, ולא זמן עבר.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,76 @@
+{
+  "chapter_id": "science_food_chains_01",
+  "subject": "מדעים לחטיבה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "שרשראות מזון ומערכות אקולוגיות",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (חט\"ב)",
+  "display_title": "מדעים לחטיבה — שרשראות מזון",
+  "source": {
+    "type": "text_source",
+    "text": "בשרשרת מזון האנרגיה עוברת מן היַצרנים (צמחים) אל הצרכנים. החץ מצביע לכיוון מעבר האנרגיה — כלומר אל מי שאוכל. מקור האנרגיה הראשוני בכל שרשרת הוא השמש, שאותה קולטים הצמחים. דוגמה: עשב ← ארנב ← שועל."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "בשרשרת \"עשב ← ארנב\", מה פירוש החץ?",
+      "options": [
+        { "id": "a", "text": "האנרגיה עוברת מהעשב לארנב (הארנב אוכל עשב)", "correct": true },
+        { "id": "b", "text": "העשב אוכל את הארנב", "correct": false },
+        { "id": "c", "text": "העשב והארנב מתחרים על אותו מזון", "correct": false },
+        { "id": "d", "text": "אין קשר ביניהם", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קורא את החץ הפוך ומבין ש\"העשב אוכל את הארנב\". אבחן את הטעות והסבר לו מה החץ בשרשרת מזון מסמן — לכיוון מי עוברת האנרגיה, ומי אוכל את מי.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "בשרשרת \"עשב ← ארנב ← שועל\", אם נעלמים כל השועלים, מה צפוי לקרות תחילה?",
+      "options": [
+        { "id": "a", "text": "מספר הארנבים יגדל", "correct": true },
+        { "id": "b", "text": "מספר הארנבים יקטן מיד", "correct": false },
+        { "id": "c", "text": "העשב ייעלם", "correct": false },
+        { "id": "d", "text": "שום דבר לא ישתנה", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד את רעיון התלות ההדדית: מדוע פגיעה בחוליה אחת (השועלים) משפיעה בשרשרת גם על הארנבים וגם על העשב — כדי שיבין שמערכת אקולוגית היא מארג מקושר.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו מקור האנרגיה הראשוני של שרשרת המזון?",
+      "options": [
+        { "id": "a", "text": "השמש (שאותה קולטים הצמחים)", "correct": true },
+        { "id": "b", "text": "האדמה", "correct": false },
+        { "id": "c", "text": "המים", "correct": false },
+        { "id": "d", "text": "הצרכנים בראש השרשרת", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שהצמחים מקבלים את האנרגיה שלהם \"מהאדמה\". אבחן את התפיסה והסבר לו כיצד האנרגיה נכנסת לשרשרת מן השמש דרך הצמחים (פוטוסינתזה), ורק אז עוברת הלאה.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -27,9 +27,11 @@ CREATE TABLE IF NOT EXISTS examinees (
   declaration    TEXT,                    -- שאלון ההצהרה (JSON)
   subjects       TEXT,                    -- המקצועות שנבחרו (JSON)
   math_level     TEXT,                    -- "5"/"4"/"3" או null
-  interview_round INTEGER,                -- באיזה סבב הריאיון
+  interview_round INTEGER,                -- (לא בשימוש במודל החי; נשמר לתאימות)
+  interviewed    INTEGER NOT NULL DEFAULT 0,  -- האם כבר התראיין (דגל)
+  in_interview   INTEGER NOT NULL DEFAULT 0,  -- כרגע בריאיון (טיימר הפרק מושהה)
   created_at     INTEGER NOT NULL,
-  status         TEXT NOT NULL DEFAULT 'registered'
+  status         TEXT NOT NULL DEFAULT 'registered'  -- registered | active | left
 );
 
 CREATE TABLE IF NOT EXISTS slots (
@@ -100,9 +102,15 @@ CREATE TABLE IF NOT EXISTS config (
 for (const alter of [
   "ALTER TABLE rounds ADD COLUMN state TEXT NOT NULL DEFAULT 'planned'",
   'ALTER TABLE rounds ADD COLUMN started_at INTEGER',
+  'ALTER TABLE examinees ADD COLUMN interviewed INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE examinees ADD COLUMN in_interview INTEGER NOT NULL DEFAULT 0',
+  // «קוד אישי» חופשי שהנבחן בוחר (לא ייחודי). המזהה הפנימי הקבוע נשאר בעמודת code.
+  'ALTER TABLE examinees ADD COLUMN pin TEXT',
 ]) {
   try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
 }
+// מילוי אחורה: לנבחנים ישנים ה«קוד האישי» הוא הקוד שאיתו נרשמו (המזהה הפנימי).
+try { db.exec("UPDATE examinees SET pin = code WHERE pin IS NULL OR pin = ''"); } catch (e) {}
 
 // אתחול 5 סבבים אם עדיין לא קיימים, עם קודי ברירת מחדל שהבוחן יכול לשנות.
 const roundCount = db.prepare('SELECT COUNT(*) AS c FROM rounds').get().c;

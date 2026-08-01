@@ -1,0 +1,76 @@
+{
+  "chapter_id": "science_circuits_01",
+  "subject": "מדעים לחטיבה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "מעגלים חשמליים",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (חט\"ב)",
+  "display_title": "מדעים לחטיבה — מעגלים חשמליים",
+  "source": {
+    "type": "text_source",
+    "text": "כדי שזרם יזרום דרוש מעגל סגור (מסלול שלם מהסוללה וחזרה אליה). במעגל טורי (הכול על לולאה אחת) הזרם זהה בכל נקודה. הזרם עצמו אינו \"נגמר\" או \"מתבזבז\" — מה שהנורה צורכת הוא אנרגיה, לא זרם. אם נתק אחד ברכיב טורי — כל המעגל נפסק."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "במעגל טורי עם שתי נורות זהות, כיצד הזרם בנורה הראשונה ביחס לזרם בשנייה?",
+      "options": [
+        { "id": "a", "text": "זהה — הזרם שווה בכל נקודות המעגל", "correct": true },
+        { "id": "b", "text": "גדול יותר בנורה הראשונה", "correct": false },
+        { "id": "c", "text": "גדול יותר בנורה השנייה", "correct": false },
+        { "id": "d", "text": "אין זרם בנורה השנייה", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בטוח ש\"הזרם מתבזבז בנורה הראשונה, ולכן לשנייה מגיע פחות\". אבחן את התפיסה הנפוצה הזו והסבר לו מה באמת נצרך בנורה (אנרגיה), ומדוע כמות הזרם נשמרת לאורך המעגל הטורי.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה הכרחי כדי שנורה תדלוק?",
+      "options": [
+        { "id": "a", "text": "מעגל סגור — מסלול שלם מהסוללה וחזרה", "correct": true },
+        { "id": "b", "text": "חוט אחד בלבד מהסוללה לנורה", "correct": false },
+        { "id": "c", "text": "שהסוללה תהיה גדולה", "correct": false },
+        { "id": "d", "text": "שהנורה תהיה חדשה", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד מדוע חוט יחיד מהסוללה לנורה אינו מספיק, ומדוע דרוש מסלול סגור שלם — כדי שיבין את מושג המעגל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "במעגל טורי עם שתי נורות, אחת הנורות נשרפת (נותקה). מה קורה לשנייה?",
+      "options": [
+        { "id": "a", "text": "גם היא נכבית — המעגל נפתח", "correct": true },
+        { "id": "b", "text": "ממשיכה לדלוק כרגיל", "correct": false },
+        { "id": "c", "text": "דולקת חזק יותר", "correct": false },
+        { "id": "d", "text": "דולקת חלש יותר אך נשארת דולקת", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מצפה שהנורה השנייה תמשיך לדלוק. אבחן את התפיסה והסבר לו מדוע במעגל טורי ניתוק של רכיב אחד \"פותח\" את כל המסלול ומפסיק את הזרם בכולו.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_5_sequences_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "5",
+  "topic": "סדרות הנדסיות",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 4 יח\"ל",
+  "display_title": "מתמטיקה 5 יח\"ל — סדרות הנדסיות",
+  "source": {
+    "type": "rule",
+    "text": "בסדרה הנדסית האיבר הכללי הוא \\(a_n=a_1\\cdot q^{\\,n-1}\\). סכום \\(n\\) האיברים הראשונים: \\(S_n=\\dfrac{a_1(q^{n}-1)}{q-1}\\). כאשר \\(|q|<1\\) קיים סכום אין־סופי: \\(S=\\dfrac{a_1}{1-q}\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזו מהסדרות הבאות היא סדרה הנדסית?",
+      "options": [
+        { "id": "a", "text": "\\(3,\\ 6,\\ 12,\\ 24,\\ \\ldots\\) (כל איבר כפול 2)", "correct": true },
+        { "id": "b", "text": "\\(3,\\ 6,\\ 9,\\ 12,\\ \\ldots\\)", "correct": false },
+        { "id": "c", "text": "\\(1,\\ 4,\\ 9,\\ 16,\\ \\ldots\\)", "correct": false },
+        { "id": "d", "text": "\\(2,\\ 2,\\ 4,\\ 6,\\ \\ldots\\)", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טוען שהסדרה \\(5,\\ 10,\\ 15,\\ 20\\) היא סדרה הנדסית, \"כי ההפרש בין האיברים קבוע\". זהה את הטעות והסבר לו, בעזרת דוגמה משלך, מה ההבדל בין מנה קבועה (הנדסית) לבין הפרש קבוע (חשבונית).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "בסדרה הנדסית \\(a_1=5\\) והמנה \\(q=2\\). מהו האיבר הרביעי \\(a_4\\)?",
+      "options": [
+        { "id": "a", "text": "40", "correct": true },
+        { "id": "b", "text": "20", "correct": false },
+        { "id": "c", "text": "80", "correct": false },
+        { "id": "d", "text": "10", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד השתמש בנוסחה \\(a_n=a_1\\cdot q^{\\,n-1}\\) וכתב בטעות \\(q^{n}\\) במקום \\(q^{\\,n-1}\\), ולכן קיבל \\(a_4=80\\). הסבר לו מדוע המעריך הוא \\(n-1\\) ולא \\(n\\) — כלומר מה מיוחד באיבר הראשון.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהו הסכום האין־סופי \\(8+4+2+1+\\ldots\\)?",
+      "options": [
+        { "id": "a", "text": "16", "correct": true },
+        { "id": "b", "text": "15", "correct": false },
+        { "id": "c", "text": "8", "correct": false },
+        { "id": "d", "text": "הסכום אינו קיים (הסדרה מתבדרת)", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד ניסה לחשב סכום אין־סופי לסדרה \\(2,\\ 6,\\ 18,\\ \\ldots\\) וקיבל מספר סופי. הסבר לו מדוע דווקא לסדרה הזו אין סכום אין־סופי, בעוד שלסדרה \\(8,\\ 4,\\ 2,\\ \\ldots\\) כן יש — מה ההבדל המהותי ביניהן.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

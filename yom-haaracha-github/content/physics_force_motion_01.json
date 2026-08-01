@@ -1,0 +1,76 @@
+{
+  "chapter_id": "physics_force_motion_01",
+  "subject": "פיזיקה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "כוח ותנועה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · מיסקונספציות מכניקה",
+  "display_title": "פיזיקה — כוח ותנועה",
+  "source": {
+    "type": "rule",
+    "text": "גוף שעליו הכוח השקול אפס ממשיך במהירות קבועה (או במנוחה). כוח גורם לתאוצה — לשינוי במהירות — ולא לעצם התנועה: \\(F=m\\cdot a\\). בנפילה חופשית (בלי התנגדות אוויר) התאוצה היא \\(g\\) ואינה תלויה במסה. מקרא: \\(F\\) הכוח השקול, \\(m\\) מסה, \\(a\\) תאוצה, \\(g\\) תאוצת הכובד."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "גלגלית הוקי מחליקה על קרח חסר חיכוך במהירות קבועה בקו ישר. מהו הכוח השקול הפועל עליה?",
+      "options": [
+        { "id": "a", "text": "אפס", "correct": true },
+        { "id": "b", "text": "כוח קבוע קדימה", "correct": false },
+        { "id": "c", "text": "כוח ההולך וקטֵן", "correct": false },
+        { "id": "d", "text": "כוח השווה למשקלה", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בטוח ש\"כדי שהגלגלית תמשיך לנוע צריך כוח שדוחף אותה קדימה\". אבחן את התפיסה השגויה הזו (מהנפוצות בפיזיקה) והסבר לו מה כוח באמת עושה — משנה מהירות, ולא \"מחזיק\" תנועה קיימת.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מכונית נוסעת ימינה ומאטה. לאיזה כיוון מופנית התאוצה?",
+      "options": [
+        { "id": "a", "text": "שמאלה (הפוך לכיוון התנועה)", "correct": true },
+        { "id": "b", "text": "ימינה (ככיוון התנועה)", "correct": false },
+        { "id": "c", "text": "אין תאוצה כלל", "correct": false },
+        { "id": "d", "text": "כלפי מעלה", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"אם המכונית נוסעת ימינה, גם התאוצה חייבת להיות ימינה\". אבחן את הבלבול בין מהירות לבין תאוצה, והסבר לו מדוע בהאטה התאוצה מנוגדת לכיוון התנועה.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "משחררים ממנוחה כדור כבד וכדור קל מאותו גובה (בלי התנגדות אוויר). מי מגיע ראשון לרצפה?",
+      "options": [
+        { "id": "a", "text": "שניהם יחד", "correct": true },
+        { "id": "b", "text": "הכבד ראשון", "correct": false },
+        { "id": "c", "text": "הקל ראשון", "correct": false },
+        { "id": "d", "text": "תלוי בצורתם", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד משוכנע ש\"כבד יותר נופל מהר יותר\". אבחן את התפיסה והסבר לו — בעזרת \\(F=m\\cdot a\\) — מדוע דווקא המסה \"מתבטלת\" והתאוצה יוצאת \\(g\\) לשני הכדורים.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

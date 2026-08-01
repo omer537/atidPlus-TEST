@@ -1,0 +1,76 @@
+{
+  "chapter_id": "physics_energy_01",
+  "subject": "פיזיקה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "שימור אנרגיה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · מיסקונספציות מכניקה",
+  "display_title": "פיזיקה — שימור אנרגיה",
+  "source": {
+    "type": "rule",
+    "text": "בלי חיכוך, האנרגיה המכנית נשמרת: סכום האנרגיה הקינטית (תנועה) והפוטנציאלית (גובה) קבוע. חיכוך אינו \"מאבד\" אנרגיה — הוא ממיר אותה לחום. המהירות בתחתית מדרון חלק תלויה רק בגובה: \\(v=\\sqrt{2\\,g\\,h}\\) — ואינה תלויה במסה. מקרא: \\(v\\) מהירות בתחתית, \\(g\\) תאוצת הכובד, \\(h\\) הגובה ההתחלתי."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מטוטלת מתנדנדת (בלי חיכוך). באיזו נקודה מהירותה מרבית?",
+      "options": [
+        { "id": "a", "text": "בנקודה הנמוכה ביותר", "correct": true },
+        { "id": "b", "text": "בשתי הנקודות הגבוהות", "correct": false },
+        { "id": "c", "text": "המהירות שווה בכל מקום", "correct": false },
+        { "id": "d", "text": "בדיוק באמצע הגובה", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שהאנרגיה \"מתבזבזת ונגמרת\" תוך כדי התנודה. אבחן את התפיסה והסבר לו כיצד האנרגיה עוברת מפוטנציאלית (בגובה) לקינטית (בתחתית) וחזרה — כך שהסכום נשמר.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מזחלת מחליקה ונעצרת בגלל חיכוך. לאן \"הלכה\" האנרגיה הקינטית שלה?",
+      "options": [
+        { "id": "a", "text": "הומרה לחום (ולעיתים לקול)", "correct": true },
+        { "id": "b", "text": "נעלמה לחלוטין", "correct": false },
+        { "id": "c", "text": "הושמדה", "correct": false },
+        { "id": "d", "text": "הפכה לכוח", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד את העיקרון שאנרגיה אינה נעלמת אלא משנה צורה: החיכוך ממיר את אנרגיית התנועה לחום. הדגם על המזחלת — היכן היינו \"מרגישים\" את החום.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "שני גופים, כבד וקל, מחליקים ממנוחה מאותו גובה במגלשה חלקה (בלי חיכוך). למי מהירות גדולה יותר בתחתית?",
+      "options": [
+        { "id": "a", "text": "שווה לשניהם", "correct": true },
+        { "id": "b", "text": "לכבד", "correct": false },
+        { "id": "c", "text": "לקל", "correct": false },
+        { "id": "d", "text": "תלוי בצבע", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בטוח ש\"הכבד יגיע מהר יותר לתחתית\". אבחן את התפיסה והסבר לו — בעזרת \\(v=\\sqrt{2\\,g\\,h}\\) — מדוע המסה אינה משפיעה על המהירות בתחתית (בדומה לנפילה חופשית).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

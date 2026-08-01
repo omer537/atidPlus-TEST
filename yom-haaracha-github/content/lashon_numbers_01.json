@@ -1,0 +1,76 @@
+{
+  "chapter_id": "lashon_numbers_01",
+  "subject": "לשון",
+  "archetype": "decode",
+  "level": null,
+  "topic": "שם המספר (התאם מין)",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "לשון — שם המספר (התאם מין)",
+  "source": {
+    "type": "text_source",
+    "text": "במספרים 2–10 הצורה הפוכה למה שמרגישים: עם שם עצם זכר משתמשים בצורה ה\"ארוכה\" (המסתיימת ב-ה): שְׁלוֹשָׁה ילדים, אַרְבָּעָה ספרים. עם שם עצם נקבה משתמשים בצורה ה\"קצרה\": שָׁלוֹשׁ בנות, אַרְבַּע מחברות. המספר 2 מופיע לפני שם עצם בצורת הנסמך: שְׁנֵי בנים, שְׁתֵּי בנות — לעומת שְׁנַיִם / שְׁתַּיִם בספירה חופשית. (במספרים 3–10 צורת הנסמך משמשת לפני שם עצם מיודע: שְׁלוֹשֶׁת הילדים.)"
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה צירוף תקני?",
+      "options": [
+        { "id": "a", "text": "שְׁלוֹשָׁה ילדים", "correct": true },
+        { "id": "b", "text": "שָׁלוֹשׁ ילדים", "correct": false },
+        { "id": "c", "text": "שְׁלוֹשָׁה בנות", "correct": false },
+        { "id": "d", "text": "שָׁלוֹשׁ ילדים גדולים", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד כתב \"שָׁלוֹשׁ ילדים\", כי לתחושתו הצורה הקצרה מתאימה לזכר. אבחן את התפיסה השגויה והסבר לו את הכלל ה\"הפוך\" — מדוע דווקא שם עצם בזכר מקבל את הצורה המסתיימת ב-ה' (שלושה).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מה הצורה התקנית: \"בקופסה יש ___ שקלים\" (שקל — זכר)?",
+      "options": [
+        { "id": "a", "text": "עֲשָׂרָה שקלים", "correct": true },
+        { "id": "b", "text": "עֶשֶׂר שקלים", "correct": false },
+        { "id": "c", "text": "עֲשֶׂרֶת שקל", "correct": false },
+        { "id": "d", "text": "עֶשֶׂר שקל", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד שיטה בת שני צעדים שתמיד עובדת: (1) לזהות את מין שם העצם, (2) לבחור את צורת המספר לפי הכלל ההפוך. הדגם על \"שקלים\".",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה צירוף תקני?",
+      "options": [
+        { "id": "a", "text": "שְׁתֵּי בנות", "correct": true },
+        { "id": "b", "text": "שְׁתַּיִם בנות", "correct": false },
+        { "id": "c", "text": "שְׁנֵי בנות", "correct": false },
+        { "id": "d", "text": "שְׁנַיִם בנות", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד כתב \"שְׁתַּיִם בנות\". אבחן את הטעות והסבר לו את ההבדל בין הצורה העומדת בפני עצמה (\"שְׁתַּיִם\", כשסופרים) לבין הצורה שלפני שם עצם (\"שְׁתֵּי בנות\") — ומדוע לפני שם עצם נדרשת צורת הנסמך.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

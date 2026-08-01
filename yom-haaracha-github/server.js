@@ -19,6 +19,31 @@ const PORT = process.env.PORT || 3000;
 const EXAMINER_PASSWORD = process.env.EXAMINER_PASSWORD || 'admin';
 const SLOT_DURATION_SEC = Number(process.env.SLOT_DURATION_SEC || 1200); // 20:00
 
+// ---------- קונפיג מקומי (מפתח AI + webhook לגוגל שיטס) ----------
+function loadLocalConfig() {
+  let cfg = {};
+  try {
+    const p = path.join(__dirname, 'config.local.json');
+    if (fs.existsSync(p)) cfg = JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) { /* קובץ פגום — מתעלמים */ }
+  return cfg;
+}
+const LOCAL_CFG = loadLocalConfig();
+// כתובת ה-webhook של גוגל שיטס (Apps Script). ריק = כבוי לגמרי, לא נשלח כלום החוצה.
+const SHEETS_WEBHOOK_URL = process.env.SHEETS_WEBHOOK_URL || LOCAL_CFG.sheetsWebhookUrl || '';
+
+// דחיפת שורה לגוגל שיטס בזמן אמת (fire-and-forget; לעולם לא שובר את המבחן).
+function pushToSheet(row) {
+  if (!SHEETS_WEBHOOK_URL) return; // לא הוגדר — שקט מוחלט
+  try {
+    fetch(SHEETS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(row),
+    }).catch(() => {}); // כישלון רשת לא מפריע לכלום
+  } catch (e) { /* אף פעם לא זורק החוצה */ }
+}
+
 app.use(express.json({ limit: '1mb' }));
 
 // ---------- כלי עזר ----------
@@ -36,6 +61,31 @@ function codeRef(code) {
 
 const getExamineeByToken = db.prepare('SELECT * FROM examinees WHERE token = ?');
 const getExamineeByCode = db.prepare('SELECT * FROM examinees WHERE code = ?');
+
+// נרמול שם להשוואת ייחודיות: מסיר רווחים בקצוות ומכווץ רווחים פנימיים כפולים.
+function normName(s) {
+  return String(s == null ? '' : s).trim().replace(/\s+/g, ' ');
+}
+// חיפוש נבחן לפי שם (מנורמל) — השם הוא הזהות המחייבת. סריקה קטנה (~50 שורות).
+function findByName(name) {
+  const key = normName(name);
+  if (!key) return null;
+  const all = db.prepare('SELECT * FROM examinees').all();
+  return all.find((e) => normName(e.name) === key) || null;
+}
+// מזהה פנימי קבוע ונסתר לכל נבחן (עליו יושבות תשובות/משבצות/ריאיונות). לא נחשף לנבחן.
+function genCode() {
+  let c;
+  do { c = 'e' + crypto.randomBytes(6).toString('hex'); } while (getExamineeByCode.get(c));
+  return c;
+}
+// האם ה«קוד האישי» שהוזן תואם לנבחן (או שהנבחן עדיין בלי קוד — אז מאמצים את מה שהוזן).
+function pinMatches(ex, typedPin) {
+  const stored = String(ex.pin == null ? '' : ex.pin).trim();
+  const typed = String(typedPin == null ? '' : typedPin).trim();
+  if (!stored) return true; // נפתח מראש לפי שם בלבד — הנבחן קובע קוד עכשיו
+  return stored === typed;
+}
 
 function authExaminee(req, res, next) {
   const token = (req.headers['x-token'] || '').trim();
@@ -88,11 +138,23 @@ function servedChapterIds(code, exceptRound) {
     : db.prepare("SELECT DISTINCT chapter_id FROM slots WHERE code = ? AND kind = 'chapter'").all(code);
   return new Set(rows.map((r) => r.chapter_id));
 }
+// מעקב "נעשה" לפי מקצוע (ולא לפי chapter_id) — כך "החלף שאלה" יכול להחליף נושא באותו מקצוע
+// בלי שהמקצוע המקורי יחזור בסבב מאוחר.
+function servedSubjects(code, exceptRound) {
+  const rows = exceptRound
+    ? db.prepare("SELECT DISTINCT subject FROM slots WHERE code = ? AND kind = 'chapter' AND round != ?").all(code, exceptRound)
+    : db.prepare("SELECT DISTINCT subject FROM slots WHERE code = ? AND kind = 'chapter'").all(code);
+  return new Set(rows.map((r) => r.subject));
+}
+function doneSubjects(code) {
+  return new Set(db.prepare("SELECT DISTINCT subject FROM slots WHERE code = ? AND kind = 'chapter' AND status = 'done'").all(code).map((r) => r.subject));
+}
 function doneChapterIds(code) {
   return new Set(db.prepare("SELECT DISTINCT chapter_id FROM slots WHERE code = ? AND kind = 'chapter' AND status = 'done'").all(code).map((r) => r.chapter_id));
 }
 function hasInterviewed(code) {
-  return !!db.prepare("SELECT 1 FROM slots WHERE code = ? AND kind = 'interview' AND status = 'done' LIMIT 1").get(code);
+  const r = db.prepare('SELECT interviewed FROM examinees WHERE code = ?').get(code);
+  return !!(r && r.interviewed);
 }
 function isMarkedInterview(round, code) {
   return !!db.prepare('SELECT 1 FROM interview_marks WHERE round = ? AND code = ?').get(round, code);
@@ -107,7 +169,8 @@ function resolveActivity(ex, round) {
     return { kind: 'interview', subject: null, level: null, chapter_id: null };
   }
   const list = chapterListForEx(ex);
-  const next = schedule.nextChapter(servedChapterIds(ex.code, round), list);
+  const doneSubj = servedSubjects(ex.code, round);          // מקצועות שכבר קיבלו משבצת בסבבים אחרים
+  const next = list.find((c) => !doneSubj.has(c.subject));  // הפרק הבא ממקצוע שטרם נעשה
   if (next) return { kind: 'chapter', subject: next.subject, level: next.level, chapter_id: next.chapter_id };
   return null; // אין פרק נותר — idle (צריך ריאיון או שסיים)
 }
@@ -175,6 +238,14 @@ function buildExamineeState(ex) {
   if (!subjectsArr.length) {
     state.phase = 'needs_setup';
     state.message = 'ברוך הבא! יש להשלים שאלון הצהרה ובחירת נושאים כדי להתחיל.';
+    return state;
+  }
+
+  // יצא לריאיון (טיימר הפרק מושהה) — מסך ריאיון עד לחזרה
+  if (ex.in_interview) {
+    state.phase = 'interview';
+    state.slot = { round: currentRunningRound(), kind: 'interview' };
+    state.message = 'יצאת לריאיון — הטיימר מושהה. כשתחזור/י תמשיך/י בדיוק מהמקום.';
     return state;
   }
 
@@ -259,16 +330,18 @@ app.post('/api/register', (req, res) => {
   const cleanName = String(name).trim();
   const cleanCode = String(code).trim();
 
-  const existing = getExamineeByCode.get(cleanCode);
+  // הזהות היא השם. הקוד האישי חופשי (לא ייחודי) ומשמש לחזרה בלבד.
+  const existing = findByName(cleanName);
   if (existing) {
-    if (existing.name.trim() !== cleanName) {
-      return res.status(409).json({ error: 'הקוד הזה כבר בשימוש. בחר/י קוד אחר.' });
+    if (!pinMatches(existing, cleanCode)) {
+      return res.status(409).json({ error: 'השם הזה כבר רשום עם קוד אחר. אם זה את/ה — הזן/י את הקוד שבחרת. אחרת בחר/י שם אחר או פנה/י למנהל.' });
     }
-    // התחברות חוזרת — מחזירים אסימון חדש ומצב קיים
+    // חזרה של נבחן קיים — אסימון חדש ומצב קיים (מאמצים קוד אם נפתח לפי שם בלבד).
     const token = newToken();
-    db.prepare('UPDATE examinees SET token = ? WHERE code = ?').run(token, cleanCode);
-    logEvent(cleanCode, 'login', 'register-existing');
-    return res.json({ token, restored: true, state: buildExamineeState(getExamineeByCode.get(cleanCode)) });
+    if (!String(existing.pin || '').trim()) db.prepare('UPDATE examinees SET pin = ? WHERE code = ?').run(cleanCode, existing.code);
+    db.prepare('UPDATE examinees SET token = ? WHERE code = ?').run(token, existing.code);
+    logEvent(existing.code, 'login', 'register-existing');
+    return res.json({ token, restored: true, state: buildExamineeState(getExamineeByCode.get(existing.code)) });
   }
 
   const chosenSubjects = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
@@ -276,16 +349,17 @@ app.post('/api/register', (req, res) => {
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
 
   const token = newToken();
-  db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'active')`).run(
-    cleanCode, cleanName, token,
+  const internalCode = genCode();
+  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'active')`).run(
+    internalCode, cleanName, cleanCode, token,
     JSON.stringify(declaration || null),
     JSON.stringify(chosenSubjects),
     mathLevel, now()
   );
   // אין בניית slots מראש — הן נבנות חי כשהמנהל מתחיל סבב.
-  logEvent(cleanCode, 'register', cleanName);
-  return res.json({ token, restored: false, state: buildExamineeState(getExamineeByCode.get(cleanCode)) });
+  logEvent(internalCode, 'register', cleanName);
+  return res.json({ token, restored: false, state: buildExamineeState(getExamineeByCode.get(internalCode)) });
 });
 
 // השלמת הרשמה לנבחן שנפתח לו משתמש מראש (בחירת מקצועות + הצהרה)
@@ -306,11 +380,16 @@ app.post('/api/complete-setup', authExaminee, (req, res) => {
 app.post('/api/login', (req, res) => {
   const { name, code } = req.body || {};
   if (!name || !code) return res.status(400).json({ error: 'נדרשים שם וקוד.' });
-  const ex = getExamineeByCode.get(String(code).trim());
-  if (!ex || ex.name.trim() !== String(name).trim()) {
-    return res.status(404).json({ error: 'לא נמצא נבחן עם השם והקוד האלה.' });
+  const ex = findByName(name);
+  if (!ex) {
+    // השם עדיין לא רשום → נבחן חדש (הלקוח ימשיך לשאלון ההצהרה).
+    return res.status(404).json({ error: 'לא נמצא נבחן עם השם הזה.' });
+  }
+  if (!pinMatches(ex, code)) {
+    return res.status(409).json({ error: 'השם הזה כבר רשום עם קוד אחר. אם זה את/ה — הזן/י את הקוד שבחרת. אחרת בחר/י שם אחר או פנה/י למנהל.' });
   }
   const token = newToken();
+  if (!String(ex.pin || '').trim()) db.prepare('UPDATE examinees SET pin = ? WHERE code = ?').run(String(code).trim(), ex.code);
   db.prepare('UPDATE examinees SET token = ? WHERE code = ?').run(token, ex.code);
   logEvent(ex.code, 'login', 'restore');
   res.json({ token, state: buildExamineeState(getExamineeByCode.get(ex.code)) });
@@ -343,18 +422,29 @@ app.post('/api/save-answer', authExaminee, (req, res) => {
 });
 
 // "החלף שאלה" — וריאנט אחר של אותו פריט (אם קיים בבנק)
+// בוחר פרק חלופי מאותו מקצוע (ואותה רמה במתמטיקה) שהנבחן טרם עשה בסבב אחר — ל"החלף שאלה".
+function pickSwapChapter(code, slot, round) {
+  const pool = (content.bySubject.get(slot.subject) || []).filter((c) => {
+    if (slot.subject === 'מתמטיקה' && slot.level) return String(c.level) === String(slot.level);
+    return true;
+  });
+  const servedElsewhere = servedChapterIds(code, round); // פרקים שכבר נעשו בסבבים אחרים
+  return pool.find((c) => c.chapter_id !== slot.chapter_id && !servedElsewhere.has(c.chapter_id)) || null;
+}
+
 app.post('/api/swap-question', authExaminee, (req, res) => {
   const { round } = req.body || {};
-  const slot = getSlot(req.examinee.code, round);
+  const r = Number(round) || currentRunningRound();
+  const slot = getSlot(req.examinee.code, r);
   if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק פעיל בסבב זה.' });
-  const chapter = content.getChapter(slot.chapter_id);
-  const variants = (chapter && chapter.variants) || [];
-  if (variants.length === 0) {
-    return res.json({ swapped: false, message: 'כרגע אין שאלה חלופית זמינה לנושא זה. (וריאנטים יתווספו בסבב הבא.)' });
+  const next = pickSwapChapter(req.examinee.code, slot, r);
+  if (!next) {
+    return res.json({ swapped: false, message: 'אין נושא חלופי זמין במקצוע זה כרגע.' });
   }
-  const nextIdx = (slot.variant_index + 1) % (variants.length + 1);
-  db.prepare('UPDATE slots SET variant_index = ? WHERE code = ? AND round = ?').run(nextIdx, req.examinee.code, round);
-  logEvent(req.examinee.code, 'swap', `round ${round}`);
+  // מחליפים לנושא אחר מהפול; הטיימר ממשיך לרוץ (החלפה לא מקנה זמן נוסף).
+  db.prepare('UPDATE slots SET chapter_id = ?, level = ?, variant_index = 0 WHERE code = ? AND round = ?')
+    .run(next.chapter_id, next.level || slot.level, req.examinee.code, r);
+  logEvent(req.examinee.code, 'swap', `round ${r} → ${next.chapter_id}`);
   res.json({ swapped: true, state: buildExamineeState(getExamineeByCode.get(req.examinee.code)) });
 });
 
@@ -380,15 +470,14 @@ app.post('/api/not-comfortable', authExaminee, (req, res) => {
     }
     return res.json({ ok: true, effect: 'noted', message: 'נרשם. אין פרק מתמטיקה נוסף להורדת רמה.' });
   }
-  // שאר המקצועות — ניסיון החלפת שאלה
-  const chapter = content.getChapter(slot.chapter_id);
-  const variants = (chapter && chapter.variants) || [];
-  if (variants.length > 0) {
-    const nextIdx = (slot.variant_index + 1) % (variants.length + 1);
-    db.prepare('UPDATE slots SET variant_index = ? WHERE code = ? AND round = ?').run(nextIdx, req.examinee.code, round);
+  // שאר המקצועות — החלפה לנושא אחר מהפול (אם קיים)
+  const next = pickSwapChapter(req.examinee.code, slot, round);
+  if (next) {
+    db.prepare('UPDATE slots SET chapter_id = ?, level = ?, variant_index = 0 WHERE code = ? AND round = ?')
+      .run(next.chapter_id, next.level || slot.level, req.examinee.code, round);
     return res.json({ ok: true, effect: 'swap', state: buildExamineeState(getExamineeByCode.get(req.examinee.code)) });
   }
-  return res.json({ ok: true, effect: 'noted', message: 'נרשם. שאלה חלופית תתווסף בסבב הבא.' });
+  return res.json({ ok: true, effect: 'noted', message: 'נרשם. אין נושא חלופי זמין כרגע.' });
 });
 
 // הגשת פרק — הנבחן סיים והגיש. המשבצת נסגרת והוא ממתין לסבב הבא.
@@ -399,6 +488,14 @@ app.post('/api/submit-slot', authExaminee, (req, res) => {
   if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק פעיל להגשה.' });
   db.prepare('UPDATE slots SET status = ? WHERE code = ? AND round = ?').run('done', req.examinee.code, r);
   logEvent(req.examinee.code, 'submit', `round ${r}`);
+  // גוגל שיטס לייב: שורה בכל הגשת פרק (כדי לראות בזמן אמת שהתוצאות נכנסות)
+  const answered = db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?').get(req.examinee.code, slot.chapter_id).c;
+  pushToSheet({
+    event: 'submit', at: new Date().toISOString(),
+    name: req.examinee.name, round: r,
+    subject: slot.subject || '', chapter_id: slot.chapter_id || '',
+    level: slot.level || '', answered,
+  });
   res.json({ ok: true, state: buildExamineeState(getExamineeByCode.get(req.examinee.code)) });
 });
 
@@ -437,19 +534,21 @@ app.post('/api/examiner/set-round-code', authExaminer, (req, res) => {
 // פתיחת משתמש לנבחן מראש (יחיד). אם לא נבחרו מקצועות — הנבחן ישלים בעצמו בכניסה.
 app.post('/api/examiner/add-examinee', authExaminer, (req, res) => {
   const { name, code, subjects, math_level, interview_round } = req.body || {};
-  if (!name || !code) return res.status(400).json({ error: 'נדרשים שם וקוד.' });
-  const cleanName = String(name).trim(), cleanCode = String(code).trim();
-  if (getExamineeByCode.get(cleanCode)) return res.status(409).json({ error: 'הקוד כבר קיים: ' + cleanCode });
+  if (!name) return res.status(400).json({ error: 'נדרש שם.' });
+  const cleanName = String(name).trim();
+  const cleanPin = String(code == null ? '' : code).trim(); // קוד אישי אופציונלי — אפשר לפתוח לפי שם בלבד
+  if (findByName(cleanName)) return res.status(409).json({ error: 'השם כבר קיים: ' + cleanName });
   const chosen = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
   const mathLevel = chosen.includes('מתמטיקה') ? (math_level || '5') : null;
-  db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(
-    cleanCode, cleanName, newToken(), JSON.stringify(null), JSON.stringify(chosen), mathLevel, now(),
+  const internalCode = genCode();
+  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(
+    internalCode, cleanName, cleanPin, newToken(), JSON.stringify(null), JSON.stringify(chosen), mathLevel, now(),
     chosen.length ? 'active' : 'registered');
   const r = Number(interview_round);
-  if (r >= 1 && r <= schedule.NUM_ROUNDS) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, cleanCode);
-  logEvent(cleanCode, 'preregister', cleanName);
-  res.json({ ok: true, code: cleanCode, needs_setup: chosen.length === 0 });
+  if (r >= 1 && r <= schedule.NUM_ROUNDS) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, internalCode);
+  logEvent(internalCode, 'preregister', cleanName);
+  res.json({ ok: true, code: internalCode, needs_setup: chosen.length === 0 });
 });
 
 // פתיחת משתמשים מרשימה. פורמט כל שורה: "שם, קוד" או "שם, קוד, סבב-ריאיון" (סבב אופציונלי 1..5).
@@ -460,15 +559,16 @@ app.post('/api/examiner/add-examinees-bulk', authExaminer, (req, res) => {
   let added = 0; const skipped = [];
   for (const line of lines) {
     const parts = line.split(/[,\t;]/).map((s) => s.trim());
-    const name = parts[0], code = parts[1];
+    const name = parts[0], pin = parts[1] || ''; // קוד אישי אופציונלי
     const roundRaw = parts[2] !== undefined ? Number(parts[2]) : null;
     const iRound = roundRaw && roundRaw >= 1 && roundRaw <= schedule.NUM_ROUNDS ? roundRaw : null;
-    if (!name || !code) { skipped.push(line + ' (חסר שם או קוד)'); continue; }
-    if (getExamineeByCode.get(code)) { skipped.push(code + ' (כבר קיים)'); continue; }
-    db.prepare(`INSERT INTO examinees (code, name, token, declaration, subjects, math_level, interview_round, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, ?, 'registered')`).run(
-      code, name, newToken(), JSON.stringify(null), JSON.stringify([]), null, now());
-    if (iRound) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(iRound, code);
+    if (!name) { skipped.push(line + ' (חסר שם)'); continue; }
+    if (findByName(name)) { skipped.push(name + ' (כבר קיים)'); continue; }
+    const internalCode = genCode();
+    db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'registered')`).run(
+      internalCode, name, pin, newToken(), JSON.stringify(null), JSON.stringify([]), null, now());
+    if (iRound) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(iRound, internalCode);
     added++;
   }
   logEvent(null, 'bulk_preregister', `נוספו ${added}`);
@@ -503,7 +603,7 @@ app.post('/api/examiner/set-interview-plan', authExaminer, (req, res) => {
     const parts = line.split(/[,\t;]/).map((s) => s.trim());
     const key = parts[0]; const r = Number(parts[1]);
     if (!key || !(r >= 1 && r <= schedule.NUM_ROUNDS)) { skipped.push(line); continue; }
-    const ex = getExamineeByCode.get(key) || db.prepare('SELECT * FROM examinees WHERE name = ?').get(key);
+    const ex = findByName(key) || getExamineeByCode.get(key);
     if (!ex) { skipped.push(line + ' (לא נמצא)'); continue; }
     if (roundState(r) !== 'planned') { skipped.push(line + ' (הסבב כבר התחיל)'); continue; }
     db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, ex.code);
@@ -519,6 +619,25 @@ app.post('/api/examiner/remove-examinee', authExaminer, (req, res) => {
   if (!getExamineeByCode.get(code)) return res.status(404).json({ error: 'נבחן לא נמצא.' });
   db.prepare('DELETE FROM examinees WHERE code = ?').run(code); // slots + answers נמחקים ב-CASCADE
   logEvent(null, 'remove_examinee', code);
+  res.json({ ok: true });
+});
+
+// עריכת שם / קוד אישי של נבחן (המנהל מתקן טעויות). המזהה הפנימי (code) לא משתנה — אין פגיעה בנתונים.
+app.post('/api/examiner/edit-examinee', authExaminer, (req, res) => {
+  const { code, name, pin } = req.body || {};
+  const ex = getExamineeByCode.get(code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  if (name !== undefined) {
+    const cleanName = normName(name);
+    if (!cleanName) return res.status(400).json({ error: 'השם לא יכול להיות ריק.' });
+    const clash = findByName(cleanName);
+    if (clash && clash.code !== ex.code) return res.status(409).json({ error: 'כבר קיים נבחן אחר בשם הזה.' });
+    db.prepare('UPDATE examinees SET name = ? WHERE code = ?').run(cleanName, ex.code);
+  }
+  if (pin !== undefined) {
+    db.prepare('UPDATE examinees SET pin = ? WHERE code = ?').run(String(pin).trim(), ex.code);
+  }
+  logEvent(ex.code, 'edit_examinee', normName(name !== undefined ? name : ex.name));
   res.json({ ok: true });
 });
 
@@ -552,6 +671,8 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
   const r = Number((req.body || {}).round) || currentRunningRound();
   if (!r || roundState(r) !== 'running') return res.status(400).json({ error: 'אין סבב פעיל לסיום.' });
   makeBackup('pre-end-round');
+  // מי שהמשבצת שלו בסבב זה היא ריאיון — מסומן "התראיין"
+  db.prepare("UPDATE examinees SET interviewed = 1 WHERE code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(r);
   db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'").run(r);
   db.prepare("UPDATE rounds SET state = 'ended' WHERE round = ?").run(r);
   logEvent(null, 'end_round', String(r));
@@ -564,6 +685,8 @@ app.post('/api/examiner/reset-round', authExaminer, (req, res) => {
   if (!r || roundState(r) === 'planned') return res.status(400).json({ error: 'אין מה לאפס בסבב זה.' });
   if (latestActiveRound() !== r) return res.status(400).json({ error: `אפס קודם את סבב ${latestActiveRound()} (המאוחר יותר).` });
   makeBackup('pre-reset-round');
+  // ביטול סימון "התראיין" למי שהריאיון שלו היה בסבב הזה
+  db.prepare("UPDATE examinees SET interviewed = 0 WHERE code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(r);
   db.prepare('DELETE FROM slots WHERE round = ?').run(r);
   db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE round = ?").run(r);
   logEvent(null, 'reset_round', String(r));
@@ -585,10 +708,96 @@ app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
   makeBackup('pre-full-reset');
   db.prepare('DELETE FROM slots').run();
   db.prepare('DELETE FROM answers').run();
+  db.prepare('UPDATE examinees SET interviewed = 0, in_interview = 0').run();
   db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL").run();
   setConfig('exam_ended', '0');
   logEvent(null, 'full_reset', '');
   res.json({ ok: true });
+});
+
+// ---------- פעולות פרטניות לנבחן בודד (טיפול במי שנפל מהקצב) ----------
+
+// קידום נבחן בודד: משבץ אותו לסבב הרץ אם אין לו משבצת (למי שהצטרף מאוחר)
+app.post('/api/examiner/advance-examinee', authExaminer, (req, res) => {
+  const ex = getExamineeByCode.get((req.body || {}).code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const r = currentRunningRound();
+  if (!r) return res.status(400).json({ error: 'אין סבב פעיל — התחל סבב תחילה.' });
+  if (JSON.parse(ex.subjects || '[]').length === 0) return res.status(400).json({ error: 'הנבחן עדיין לא בחר מקצועות.' });
+  if (getSlot(ex.code, r)) return res.json({ ok: true, note: 'כבר משובץ בסבב הנוכחי.' });
+  const act = resolveActivity(ex, r);
+  if (!act) return res.json({ ok: false, warn: 'אין פעילות נותרת לנבחן (סיים הכול או צריך ריאיון).' });
+  db.prepare('INSERT INTO slots (code, round, kind, subject, level, chapter_id, duration_sec) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(ex.code, r, act.kind, act.subject, act.level, act.chapter_id, SLOT_DURATION_SEC);
+  logEvent(ex.code, 'advance_examinee', `round ${r} ${act.kind}`);
+  res.json({ ok: true, activity: act.kind });
+});
+
+// יצא לריאיון — משהה את טיימר הפרק שלו (אם יש) ומסמן "בריאיון"
+app.post('/api/examiner/interview-out', authExaminer, (req, res) => {
+  const ex = getExamineeByCode.get((req.body || {}).code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  db.prepare('UPDATE examinees SET in_interview = 1 WHERE code = ?').run(ex.code);
+  const r = currentRunningRound();
+  const slot = r ? getSlot(ex.code, r) : null;
+  if (slot && slot.kind === 'chapter' && !slot.paused) {
+    db.prepare('UPDATE slots SET paused = 1, paused_at = ? WHERE code = ? AND round = ?').run(now(), ex.code, r);
+  }
+  logEvent(ex.code, 'interview_out', '');
+  res.json({ ok: true });
+});
+
+// חזר מריאיון — מחדש את הטיימר, מסמן "התראיין"
+app.post('/api/examiner/interview-return', authExaminer, (req, res) => {
+  const ex = getExamineeByCode.get((req.body || {}).code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  db.prepare('UPDATE examinees SET in_interview = 0, interviewed = 1 WHERE code = ?').run(ex.code);
+  const r = currentRunningRound();
+  const slot = r ? getSlot(ex.code, r) : null;
+  if (slot && slot.kind === 'chapter' && slot.paused) {
+    const add = slot.paused_at ? Math.floor((now() - slot.paused_at) / 1000) : 0;
+    db.prepare('UPDATE slots SET paused = 0, paused_at = NULL, paused_accum_sec = paused_accum_sec + ? WHERE code = ? AND round = ?').run(add, ex.code, r);
+  }
+  logEvent(ex.code, 'interview_return', '');
+  res.json({ ok: true });
+});
+
+// פתיחת הגשה מחדש — מחזיר משבצת פרק שהוגשה למצב פעיל
+app.post('/api/examiner/reopen-submit', authExaminer, (req, res) => {
+  const ex = getExamineeByCode.get((req.body || {}).code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const r = currentRunningRound();
+  const slot = r ? getSlot(ex.code, r) : null;
+  if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק להחזרה.' });
+  db.prepare("UPDATE slots SET status = 'active' WHERE code = ? AND round = ?").run(ex.code, r);
+  logEvent(ex.code, 'reopen_submit', '');
+  res.json({ ok: true });
+});
+
+// סימון שנבחן עזב (פטור) / החזרה לפעילות
+app.post('/api/examiner/set-left', authExaminer, (req, res) => {
+  const { code, left } = req.body || {};
+  const ex = getExamineeByCode.get(code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  db.prepare('UPDATE examinees SET status = ? WHERE code = ?').run(left ? 'left' : 'active', code);
+  logEvent(code, left ? 'mark_left' : 'unmark_left', '');
+  res.json({ ok: true });
+});
+
+// חלוקה אוטומטית לקבוצות: מפזר את מי שעדיין לא משובץ לריאיון על פני הסבבים הפתוחים, שווה בשווה
+app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
+  const plannedRounds = db.prepare("SELECT round FROM rounds WHERE state = 'planned' ORDER BY round").all().map((r) => r.round);
+  if (!plannedRounds.length) return res.status(400).json({ error: 'אין סבבים פתוחים לתכנון.' });
+  const marked = new Set(db.prepare("SELECT code FROM interview_marks WHERE round IN (SELECT round FROM rounds WHERE state = 'planned')").all().map((r) => r.code));
+  const rows = db.prepare("SELECT code FROM examinees WHERE status = 'active' AND interviewed = 0 ORDER BY created_at").all().filter((r) => !marked.has(r.code));
+  let i = 0, assigned = 0;
+  for (const ex of rows) {
+    const round = plannedRounds[i % plannedRounds.length]; i++;
+    db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(round, ex.code);
+    assigned++;
+  }
+  logEvent(null, 'autosplit', `${assigned} → ${plannedRounds.length} סבבים`);
+  res.json({ ok: true, assigned });
 });
 
 // סטטוס חי של כל הנבחנים + מצב הסבבים + סימוני ריאיון
@@ -601,33 +810,98 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
     const subjects = JSON.parse(ex.subjects || '[]');
     const setup = subjects.length > 0;
     const chapterList = setup ? chapterListForEx(ex) : [];
-    const done = doneChapterIds(ex.code);
+    const doneSubj = doneSubjects(ex.code);
     const interviewed = hasInterviewed(ex.code);
     const slot = running ? getSlot(ex.code, running) : null;
     const timer = slot ? computeTimer(slot) : { state: 'none', remaining_sec: 0 };
     const answered = slot && slot.chapter_id
       ? db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code = ? AND chapter_id = ?').get(ex.code, slot.chapter_id).c : 0;
     const flags = db.prepare("SELECT COUNT(*) AS c FROM events WHERE code = ? AND type IN ('blur','tabhide','paste_blocked')").get(ex.code).c;
-    const doneNames = chapterList.filter((c) => done.has(c.chapter_id)).map((c) => c.subject);
-    const remaining = chapterList
-      .filter((c) => !done.has(c.chapter_id) && (!slot || slot.chapter_id !== c.chapter_id))
-      .map((c) => c.subject);
+    const doneNames = [...new Set(chapterList.filter((c) => doneSubj.has(c.subject)).map((c) => c.subject))];
+    const remaining = [...new Set(chapterList
+      .filter((c) => !doneSubj.has(c.subject) && (!slot || slot.subject !== c.subject))
+      .map((c) => c.subject))];
     const current = slot ? {
       round: slot.round, kind: slot.kind, subject: slot.subject, level: slot.level,
       status: slot.status, not_comfortable: !!slot.not_comfortable,
     } : null;
-    const finished = setup && interviewed && chapterList.length > 0 && chapterList.every((c) => done.has(c.chapter_id));
+    const left = ex.status === 'left';
+    const finished = setup && interviewed && chapterList.length > 0 && chapterList.every((c) => doneSubj.has(c.subject));
     return {
-      code: ex.code, name: ex.name, setup, subjects,
+      code: ex.code, name: ex.name, pin: ex.pin || '', setup, subjects, left,
       chapters_total: chapterList.length,
       chapters_done: doneNames,
       remaining_chapters: remaining,
-      interviewed, needs_interview: setup && !interviewed && !finished, finished,
+      interviewed, in_interview: !!ex.in_interview,
+      needs_interview: setup && !interviewed && !finished && !left, finished,
       current, timer, answered, flags,
       marked_rounds: marks.filter((m) => m.code === ex.code).map((m) => m.round),
     };
   });
   res.json({ running, total_rounds: schedule.NUM_ROUNDS, rounds: roundsArr, examinees: list });
+});
+
+// מטריצה מלאה: לכל נבחן שורת 5 תאים (סבב 1..5). עבר/הווה = אמת (מ-slots), עתיד = צפי.
+app.get('/api/examiner/matrix', authExaminer, (req, res) => {
+  const running = currentRunningRound();
+  const roundsArr = db.prepare('SELECT round, state FROM rounds ORDER BY round').all();
+  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const N = schedule.NUM_ROUNDS;
+
+  const list = examinees.map((ex) => {
+    const setup = JSON.parse(ex.subjects || '[]').length > 0;
+    const chapterList = setup ? chapterListForEx(ex) : [];
+    const left = ex.status === 'left';
+    const cells = new Array(N + 1).fill(null); // אינדקס 1..5
+
+    // מה כבר שובץ בפועל (בסבבים שהתחילו) — לחישוב הצפי לעתיד. לפי מקצוע (עקבי עם "החלף שאלה").
+    const servedSubj = servedSubjects(ex.code);             // כל מקצוע שכבר קיבל משבצת
+    const hadInterviewSlot = !!db.prepare("SELECT 1 FROM slots WHERE code = ? AND kind = 'interview'").get(ex.code);
+    let interviewedProjected = hasInterviewed(ex.code) || hadInterviewSlot;
+
+    // שלב א' — סבבים שהתחילו (running/ended): קוראים את המשבצת האמיתית.
+    for (let r = 1; r <= N; r++) {
+      const rState = (roundsArr.find((x) => x.round === r) || {}).state || 'planned';
+      if (rState === 'planned') continue; // עתיד — נטופל בשלב ב'
+      const slot = getSlot(ex.code, r);
+      if (!slot) { cells[r] = { type: 'idle', label: '—' }; continue; }
+      if (slot.kind === 'interview') {
+        cells[r] = { type: r === running ? 'interview_current' : 'interview_done', label: 'ריאיון' };
+      } else {
+        const done = slot.status === 'done';
+        cells[r] = { type: done ? 'done' : 'current', label: slot.subject || '—', level: slot.level || null };
+      }
+    }
+
+    // שלב ב' — סבבים עתידיים (planned): צפי מלא לפי המקצועות שנותרו (ייחודי) + סימוני ריאיון.
+    const seenSubj = new Set(servedSubj);
+    const remaining = chapterList.filter((c) => { if (seenSubj.has(c.subject)) return false; seenSubj.add(c.subject); return true; });
+    let pi = 0;
+    for (let r = 1; r <= N; r++) {
+      const rState = (roundsArr.find((x) => x.round === r) || {}).state || 'planned';
+      if (rState !== 'planned') continue;
+      if (isMarkedInterview(r, ex.code) && !interviewedProjected) {
+        cells[r] = { type: 'interview_future', label: 'ריאיון' };
+        interviewedProjected = true;
+      } else if (pi < remaining.length) {
+        const c = remaining[pi++];
+        cells[r] = { type: 'predicted', label: c.subject, level: c.level || null };
+      } else if (!interviewedProjected) {
+        cells[r] = { type: 'interview_future', label: 'ריאיון' };
+        interviewedProjected = true;
+      } else {
+        cells[r] = { type: 'idle', label: '—' };
+      }
+    }
+
+    return {
+      code: ex.code, name: ex.name, left, setup,
+      needs_interview_unplanned: setup && !interviewedProjected && !left,
+      cells: cells.slice(1), // 0-based מערך של 5
+    };
+  });
+
+  res.json({ running, total_rounds: N, rounds: roundsArr, examinees: list });
 });
 
 // עקיפות ידניות: הוספת זמן / השהיה / המשך / איפוס משבצת
@@ -827,6 +1101,34 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="assessment-answers.xlsx"');
+  res.send(buf);
+});
+
+// ייצוא רשימת נבחנים + קודים אישיים + סבב ריאיון — "גיבוי מקורקע" שהמנהל מחזיק אצלו
+app.get('/api/examiner/export-roster', authExaminer, (req, res) => {
+  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const rows = examinees.map((ex) => {
+    const marks = db.prepare('SELECT round FROM interview_marks WHERE code = ? ORDER BY round').all(ex.code).map((r) => r.round);
+    const subs = JSON.parse(ex.subjects || '[]');
+    return {
+      'שם': ex.name,
+      'קוד אישי (סיסמה)': ex.pin || '',
+      'מקצועות': subs.join(', '),
+      'רמת מתמטיקה': ex.math_level || '',
+      'סבב ריאיון': marks.length ? marks.join(', ') : '',
+      'התראיין': ex.interviewed ? 'כן' : '',
+      'סטטוס': ex.status === 'left' ? 'עזב' : (ex.status === 'active' ? 'פעיל' : 'רשום'),
+    };
+  });
+  const header = ['שם', 'קוד אישי (סיסמה)', 'מקצועות', 'רמת מתמטיקה', 'סבב ריאיון', 'התראיין', 'סטטוס'];
+  const ws = XLSX.utils.json_to_sheet(rows, { header });
+  ws['!views'] = [{ RTL: true }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 32 }, { wch: 12 }, { wch: 11 }, { wch: 9 }, { wch: 10 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'נבחנים');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="examinees-roster.xlsx"');
   res.send(buf);
 });
 

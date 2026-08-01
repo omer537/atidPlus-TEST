@@ -1,0 +1,76 @@
+{
+  "chapter_id": "robotics_gears_01",
+  "subject": "רובוטיקה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "גלגלי שיניים ושיווי משקל",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (ז'–ט')",
+  "display_title": "רובוטיקה — גלגלי שיניים ושיווי משקל",
+  "source": {
+    "type": "text_source",
+    "text": "כאשר גלגל שיניים קטן מסובב גלגל גדול, הגדול מסתובב לאט יותר אך מפעיל כוח (מומנט) גדול יותר — וההפך. רובוט יציב יותר (קשה יותר להפילו) ככל שמרכז המסה שלו נמוך יותר והבסיס שלו רחב יותר."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "גלגל שיניים קטן מסובב גלגל גדול. הגלגל הגדול יסתובב:",
+      "options": [
+        { "id": "a", "text": "לאט יותר מהקטן", "correct": true },
+        { "id": "b", "text": "מהר יותר מהקטן", "correct": false },
+        { "id": "c", "text": "באותה מהירות בדיוק", "correct": false },
+        { "id": "d", "text": "לא יסתובב כלל", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"גלגל גדול = מסתובב מהר יותר\". אבחן את התפיסה והסבר לו את חילופי הגומלין בין מהירות לכוח: גלגל גדול מסתובב לאט יותר אך מפעיל כוח רב יותר — ולמה זה שימושי ברובוט.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "כדי שרובוט יהיה יציב יותר ולא יתהפך, כדאי:",
+      "options": [
+        { "id": "a", "text": "להנמיך את מרכז המסה ולהרחיב את הבסיס", "correct": true },
+        { "id": "b", "text": "לשים את החלקים הכבדים גבוה למעלה", "correct": false },
+        { "id": "c", "text": "לצמצם את הבסיס ולהגביה את הרובוט", "correct": false },
+        { "id": "d", "text": "הצורה אינה משפיעה על יציבות", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"חלקים כבדים למעלה עושים את הרובוט יציב יותר\". אבחן את התפיסה והסבר לו כיצד מרכז מסה נמוך ובסיס רחב מקטינים את הסיכוי להתהפך.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה רובוט יתהפך בקלות רבה יותר?",
+      "options": [
+        { "id": "a", "text": "רובוט גבוה וצר", "correct": true },
+        { "id": "b", "text": "רובוט נמוך ורחב", "correct": false },
+        { "id": "c", "text": "שניהם באותה מידה", "correct": false },
+        { "id": "d", "text": "אי אפשר לדעת", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד מדוע רובוט גבוה וצר מתהפך בקלות רבה יותר מרובוט נמוך ורחב — כיצד רוחב הבסיס וגובה מרכז המסה קובעים את היציבות.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,77 @@
+{
+  "chapter_id": "math_5_calculus_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "5",
+  "topic": "חשבון דיפרנציאלי ואינטגרלי",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 4 יח\"ל",
+  "display_title": "מתמטיקה 5 יח\"ל — חשבון דיפרנציאלי ואינטגרלי",
+  "source": {
+    "type": "function",
+    "tex": "f(x)=\\dfrac{x}{x^{2}+4}",
+    "note": "הפונקציה מוגדרת לכל \\(x\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נגזרת הפונקציה היא:",
+      "options": [
+        { "id": "a", "tex": "f'(x)=\\dfrac{4-x^{2}}{(x^{2}+4)^{2}}", "correct": true },
+        { "id": "b", "tex": "f'(x)=\\dfrac{x^{2}+4}{(x^{2}+4)^{2}}", "correct": false },
+        { "id": "c", "tex": "f'(x)=\\dfrac{1}{2x}", "correct": false },
+        { "id": "d", "tex": "f'(x)=\\dfrac{x^{2}-4}{(x^{2}+4)^{2}}", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד גזר וקיבל \\(f'(x)=\\dfrac{1}{2x}\\) — הוא גזר בנפרד את המונה ואת המכנה וחילק ביניהם. הסבר לו היכן ההיגיון שלו נשבר וכיצד היית מכוון אותו לחשוב נכון על גזירת מנה — בלי לפתור עבורו את התרגיל.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "נקודות הקיצון ותחום העלייה של הפונקציה הם:",
+      "options": [
+        { "id": "a", "text": "מקסימום ב-\\((2,\\tfrac{1}{4})\\), מינימום ב-\\((-2,-\\tfrac{1}{4})\\), עולה בתחום \\(-2<x<2\\)", "correct": true },
+        { "id": "b", "text": "מינימום ב-\\((2,\\tfrac{1}{4})\\), מקסימום ב-\\((-2,-\\tfrac{1}{4})\\), עולה בתחום \\(x>2\\)", "correct": false },
+        { "id": "c", "text": "אין נקודות קיצון, הפונקציה עולה בכל תחום ההגדרה", "correct": false },
+        { "id": "d", "text": "מקסימום ב-\\((0,0)\\), עולה בתחום \\(x<0\\)", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד טוען שהפונקציה \"עולה בכל מקום כי המונה \\(x\\) עולה\". זהה את הטעות והסבר במילים כיצד סימן הנגזרת קובע עלייה או ירידה, ומה קורה משני צידי \\(x=2\\).",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "השטח הכלוא בין הגרף לציר ה-\\(x\\) בתחום \\(0\\le x\\le 2\\) הוא (נתון: \\(\\int \\dfrac{x}{x^{2}+4}\\,dx=\\tfrac{1}{2}\\ln(x^{2}+4)+C\\)):",
+      "options": [
+        { "id": "a", "tex": "\\tfrac{1}{2}\\ln 2", "correct": true },
+        { "id": "b", "tex": "\\tfrac{1}{2}\\ln 4", "correct": false },
+        { "id": "c", "tex": "\\ln 2", "correct": false },
+        { "id": "d", "tex": "\\tfrac{1}{2}\\ln 8", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מדוע לחישוב שטח נדרש אינטגרל מסוים ולא רק פונקציה קדומה, ומה מייצג כל אחד משני גבולות האינטגרל.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

@@ -1,0 +1,77 @@
+{
+  "chapter_id": "math_4_calculus_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "4",
+  "topic": "חשבון דיפרנציאלי — פונקציית מכפלה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · לא בנוח → 3 יח\"ל",
+  "display_title": "מתמטיקה 4 יח\"ל — חשבון דיפרנציאלי",
+  "source": {
+    "type": "function",
+    "tex": "f(x)=x\\,(x-6)^{2}",
+    "note": "הנגזרת נתונה: \\(f'(x)=3(x-2)(x-6)\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "ידוע ש-\\(f'(4)=-12\\). מה זה מלמד על הפונקציה בנקודה \\(x=4\\)?",
+      "options": [
+        { "id": "a", "text": "הפונקציה יורדת ב-\\(x=4\\)", "correct": true },
+        { "id": "b", "text": "הפונקציה עולה ב-\\(x=4\\)", "correct": false },
+        { "id": "c", "text": "יש נקודת קיצון ב-\\(x=4\\)", "correct": false },
+        { "id": "d", "text": "הגרף חותך את ציר ה-\\(x\\) ב-\\(x=4\\)", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד שואל מה בעצם אומר המספר \\(f'(4)=-12\\). הסבר לו מה הנגזרת מודדת בנקודה מסוימת, ומה מלמד אותנו הסימן השלילי על ההתנהגות של הפונקציה שם.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "הנגזרת מתאפסת ב-\\(x=2\\) וב-\\(x=6\\). נקודות הקיצון של הפונקציה הן:",
+      "options": [
+        { "id": "a", "text": "מקסימום ב-\\((2,32)\\), מינימום ב-\\((6,0)\\)", "correct": true },
+        { "id": "b", "text": "מינימום ב-\\((2,32)\\), מקסימום ב-\\((6,0)\\)", "correct": false },
+        { "id": "c", "text": "מקסימום ב-\\((2,0)\\), מינימום ב-\\((6,32)\\)", "correct": false },
+        { "id": "d", "text": "אין נקודות קיצון", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מצא נכון שהנגזרת מתאפסת ב-\\(x=2\\) וב-\\(x=6\\), אבל כדי למצוא את שיעור ה-\\(y\\) הוא הציב את הערכים בנגזרת \\(f'\\) במקום בפונקציה \\(f\\). הסבר לו מאיזו פונקציה מקבלים את שיעור ה-\\(y\\) של נקודת הקיצון, ומדוע.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "תחומי העלייה של הפונקציה הם:",
+      "options": [
+        { "id": "a", "text": "\\(x<2\\) וגם \\(x>6\\)", "correct": true },
+        { "id": "b", "text": "\\(2<x<6\\)", "correct": false },
+        { "id": "c", "text": "עולה בכל תחום ההגדרה", "correct": false },
+        { "id": "d", "text": "יורדת בכל תחום ההגדרה", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קבע שהפונקציה עולה \"היכן שהנגזרת עולה\". הסבר לו את ההבדל בין השאלה אם ערך הנגזרת חיובי או שלילי, לבין השאלה אם הנגזרת עצמה עולה — ומהו הקריטריון הנכון לעלייה של \\(f\\).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

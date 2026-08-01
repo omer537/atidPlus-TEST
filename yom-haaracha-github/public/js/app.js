@@ -33,8 +33,79 @@
     saveTimers: {},
     pollHandle: null,
     tickHandle: null,
+    outbox: [],
+    online: (typeof navigator !== 'undefined' ? navigator.onLine : true),
+    retryHandle: null,
   };
   window.App = App;
+
+  /* ============================================================
+     שכבת ביטחון — עמידות רשת:
+     כל תשובה נשמרת קודם מקומית (localStorage) ונכנסת לתור שליחה.
+     אם הרשת נופלת — התשובות לא הולכות לאיבוד; התור מנסה שוב עד שמצליח.
+     ============================================================ */
+  var OUTBOX_KEY = 'yh_outbox';
+  var flushing = false;
+  function loadOutbox() {
+    try { App.outbox = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]') || []; }
+    catch (e) { App.outbox = []; }
+  }
+  function persistOutbox() { try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(App.outbox)); } catch (e) {} }
+  function obKey(chapterId, item) { return chapterId + '|' + item; }
+  function enqueueSave(body) {
+    var k = obKey(body.chapter_id, body.item_id);
+    App.outbox = App.outbox.filter(function (o) { return o.k !== k; }); // רק הגרסה האחרונה של כל פריט
+    App.outbox.push({ k: k, body: body });
+    persistOutbox();
+    updateNetStatus();
+    flushOutbox();
+  }
+  function pendingAnswer(chapterId, item) {
+    var k = obKey(chapterId, item);
+    for (var i = App.outbox.length - 1; i >= 0; i--) if (App.outbox[i].k === k) return App.outbox[i].body.answer;
+    return undefined;
+  }
+  async function flushOutbox() {
+    if (flushing || !App.token || !App.outbox.length) { updateNetStatus(); return; }
+    flushing = true;
+    try {
+      while (App.outbox.length) {
+        var item = App.outbox[0];
+        try {
+          await API.call('/save-answer', 'POST', item.body);
+        } catch (e) {
+          App.online = false; updateNetStatus();
+          setHint(item.body.item_id, 'אין רשת — התשובה נשמרה אצלך ותישלח אוטומטית', false);
+          scheduleRetry();
+          return;
+        }
+        var idx = App.outbox.indexOf(item); // ייתכן שהוחלף בגרסה חדשה בזמן השליחה
+        if (idx >= 0) App.outbox.splice(idx, 1);
+        persistOutbox();
+        App.online = true;
+        setHint(item.body.item_id, 'נשמר', true);
+      }
+    } finally { flushing = false; updateNetStatus(); }
+  }
+  function scheduleRetry() {
+    if (App.retryHandle) return;
+    App.retryHandle = setTimeout(function () { App.retryHandle = null; flushOutbox(); }, 3000);
+  }
+  function updateNetStatus() {
+    var box = document.getElementById('net-status');
+    if (!box) return;
+    var pending = App.outbox.length;
+    if (!App.online || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      box.className = 'net-status offline';
+      box.textContent = 'אין חיבור לרשת · ' + (pending ? pending + ' תשובות שמורות אצלך וישלחו אוטומטית כשהחיבור יחזור' : 'התשובות נשמרות אצלך');
+    } else if (pending) {
+      box.className = 'net-status pending';
+      box.textContent = 'שומר… (' + pending + ' ממתינות)';
+    } else {
+      box.className = 'net-status ok';
+      box.textContent = '';
+    }
+  }
 
   var root = document.getElementById('root');
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
@@ -44,6 +115,16 @@
 
   // ---------------------------------------------------------------- אתחול
   async function init() {
+    // שכבת ביטחון: אלמנט מצב-רשת קבוע + טעינת תור שמור + מאזינים
+    if (!document.getElementById('net-status')) {
+      var ns = el('<div id="net-status" class="net-status ok"></div>');
+      document.body.appendChild(ns);
+    }
+    loadOutbox();
+    window.addEventListener('online', function () { App.online = true; updateNetStatus(); flushOutbox(); });
+    window.addEventListener('offline', function () { App.online = false; updateNetStatus(); });
+    updateNetStatus();
+
     try {
       var subj = await API.call('/subjects');
       App.subjectsAvailable = (subj && subj.subjects) || [];
@@ -76,12 +157,12 @@
     var card = el(
       '<div class="card" style="max-width:440px;width:100%">' + BRAND +
       '<h2>ברוכים הבאים</h2>' +
-      '<p class="lead">הזינו שם מלא וקוד אישי כדי להתחיל. אם כבר התחלתם והתנתקתם — הזינו שוב <b>אותו שם ואותו קוד</b>, ותחזרו בדיוק לאותה נקודה.</p>' +
+      '<p class="lead">הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> משלכם כדי להתחיל. אם כבר התחלתם והתנתקתם — הזינו שוב את אותו שם ואותו קוד, ותחזרו בדיוק לאותה נקודה.</p>' +
       '<div id="err"></div>' +
       '<label class="field"><span>שם מלא</span><input id="name" type="text" autocomplete="off" placeholder="ישראל ישראלי"></label>' +
-      '<label class="field"><span>קוד אישי</span><input id="code" type="text" autocomplete="off" placeholder="לדוגמה: 4821"></label>' +
+      '<label class="field"><span>קוד אישי (בחירה חופשית)</span><input id="code" type="text" autocomplete="off" placeholder="לדוגמה: 4821"></label>' +
       '<div class="btn-row"><button class="btn" id="go">כניסה / התחלה</button></div>' +
-      '<p class="hint-text">הקוד האישי הוא סיסמה שאתם בוחרים עכשיו וזוכרים. הוא משמש לשחזור אם תתנתקו או תצאו לריאיון.</p>' +
+      '<p class="hint-text">השם הוא המזהה שלכם. הקוד הוא סיסמה שאתם בוחרים עכשיו וזוכרים — הוא משמש לשחזור אם תתנתקו או תצאו לריאיון. אפשר לבחור כל קוד שרוצים.</p>' +
       '</div>'
     );
     root.appendChild(card);
@@ -242,12 +323,14 @@
     if (App.tickHandle) clearInterval(App.tickHandle);
   }
   async function poll() {
+    flushOutbox(); // שכבת ביטחון: כל מחזור מנסה גם לשלוח תשובות שממתינות
     try {
       var s = await API.call('/state');
       App.state = s;
+      App.online = true;
       if (App.view === 'exam') renderExam();
       else if (App.view !== 'declaration' && App.view !== 'subjects') renderExam();
-    } catch (e) { /* התעלמות משגיאות רשת זמניות */ }
+    } catch (e) { App.online = false; updateNetStatus(); /* שגיאת רשת זמנית — התור ימשיך לנסות */ }
   }
 
   // ---------------------------------------------------------------- מסך המבחן
@@ -266,6 +349,7 @@
   function onLogout() {
     if (!confirm('לצאת מהמערכת? תוכל/י לחזור עם אותו שם וקוד.')) return;
     localStorage.removeItem('yh_token'); App.token = null; App.state = null; App.renderedKey = null;
+    App.outbox = []; persistOutbox(); updateNetStatus(); // שכבת ביטחון: לא להשאיר תור של נבחן קודם במכשיר
     stopLoops(); App.view = 'login'; render();
   }
 
@@ -323,6 +407,10 @@
     var ch = s.chapter;
     var savedMap = {};
     (s.answers || []).forEach(function (a) { savedMap[a.item_id] = a.answer; });
+    // שכבת ביטחון: העדפת ערך מקומי שממתין לשליחה (שלא ייעלם אם השרת עדיין לא קיבל)
+    App.outbox.forEach(function (o) {
+      if (o.body.chapter_id === s.slot.chapter_id) savedMap[o.body.item_id] = o.body.answer;
+    });
     App.itemStart = {};
     var t = Date.now();
 
@@ -369,6 +457,12 @@
 
   async function onSubmit(round) {
     if (!confirm('להגיש את הפרק? לאחר ההגשה לא ניתן לערוך את התשובות בפרק זה.')) return;
+    // שכבת ביטחון: לוודא שכל התשובות הגיעו לשרת לפני ההגשה
+    await flushOutbox();
+    if (App.outbox.some(function (o) { return o.body.round === round; })) {
+      flash('יש תשובות שעדיין לא נשלחו (אין רשת כרגע). הן שמורות אצלך והמערכת ממשיכה לנסות — נסה/י להגיש שוב עוד רגע.', 'warn');
+      return;
+    }
     try {
       var r = await API.call('/submit-slot', 'POST', { round: round });
       App.state = r.state; App.renderedKey = null; renderExam();
@@ -414,7 +508,6 @@
 
     var actions = '<div class="q-actions">' +
       '<button class="btn ghost small act-swap" data-item="' + esc(it.id) + '">החלף שאלה</button>' +
-      '<button class="btn ghost small act-nc" data-item="' + esc(it.id) + '">לא בנוח</button>' +
       '<span class="save-hint" data-hint="' + esc(it.id) + '"></span></div>';
 
     return '<div class="qcard" data-type="' + esc(it.type) + '">' + head + body + actions + '</div>';
@@ -443,16 +536,13 @@
         }, 800);
       };
     });
-    // החלף שאלה / לא בנוח
+    // החלף שאלה — מעבר לנושא אחר מאותו מקצוע
     root.querySelectorAll('.act-swap').forEach(function (b) { b.onclick = function () { onSwap(round); }; });
-    root.querySelectorAll('.act-nc').forEach(function (b) { b.onclick = function () { onNotComfortable(round); }; });
   }
 
-  async function saveAnswer(round, chapterId, item, type, answer, spent) {
-    try {
-      await API.call('/save-answer', 'POST', { round: round, chapter_id: chapterId, item_id: item, type: type, answer: answer, time_spent_sec: spent });
-      setHint(item, 'נשמר', true);
-    } catch (e) { setHint(item, 'שגיאת שמירה — ננסה שוב', false); }
+  function saveAnswer(round, chapterId, item, type, answer, spent) {
+    setHint(item, 'שומר…');
+    enqueueSave({ round: round, chapter_id: chapterId, item_id: item, type: type, answer: answer, time_spent_sec: spent });
   }
   function setHint(item, text, ok) {
     var h = root.querySelector('.save-hint[data-hint="' + item + '"]');

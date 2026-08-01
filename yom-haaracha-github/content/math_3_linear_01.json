@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_3_linear_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "3",
+  "topic": "בעיה מילולית לינארית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · יישומי",
+  "display_title": "מתמטיקה 3 יח\"ל — בעיה מילולית לינארית",
+  "source": {
+    "type": "rule",
+    "text": "למתן יש \\(1440\\) ש\"ח, והוא מוציא \\(120\\) ש\"ח בכל חודש. לרועי יש \\(540\\) ש\"ח, והוא חוסך \\(60\\) ש\"ח בכל חודש. \\(x\\) = מספר החודשים."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה ביטוי מתאר את הסכום של מתן כעבור \\(x\\) חודשים?",
+      "options": [
+        { "id": "a", "tex": "1440-120x", "correct": true },
+        { "id": "b", "tex": "1440+120x", "correct": false },
+        { "id": "c", "tex": "540+60x", "correct": false },
+        { "id": "d", "tex": "120x-1440", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד כיצד מתרגמים את המשפט \"מתחילים עם \\(1440\\) ומוציאים \\(120\\) בכל חודש\" לביטוי אלגברי — מה הופך למה, ומה תפקידו של \\(x\\) בביטוי.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "פתרו את המשוואה \\(1440-120x=540+60x\\). כעבור כמה חודשים יהיה לשניהם אותו סכום?",
+      "options": [
+        { "id": "a", "text": "5", "correct": true },
+        { "id": "b", "text": "3", "correct": false },
+        { "id": "c", "text": "9", "correct": false },
+        { "id": "d", "text": "15", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד פתר וקיבל \\(x=5\\), אך לא מבין מה המספר הזה אומר על מתן ורועי. הסבר לו מה מייצגת נקודת הפתרון בסיפור — מה בדיוק קורה כעבור 5 חודשים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזו טענה על השינוי החודשי נכונה?",
+      "options": [
+        { "id": "a", "text": "הסכום של מתן קטֵן ב-\\(120\\) בכל חודש, ושל רועי גדֵל ב-\\(60\\)", "correct": true },
+        { "id": "b", "text": "שניהם גדלים בכל חודש", "correct": false },
+        { "id": "c", "text": "שניהם קטֵנים בכל חודש", "correct": false },
+        { "id": "d", "text": "הסכום של מתן גדל ושל רועי קטֵן", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד מה מייצגים המספרים \\(120\\) ו-\\(60\\) בביטויים, ומה מלמד אותנו ההבדל בסימן — מדוע הסכום של אחד יורד עם הזמן והשני עולה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

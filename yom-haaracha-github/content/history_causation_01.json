@@ -1,0 +1,76 @@
+{
+  "chapter_id": "history_causation_01",
+  "subject": "היסטוריה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "סיבה, עילה ותוצאה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (חשיבה היסטורית)",
+  "display_title": "היסטוריה — סיבה, עילה ותוצאה",
+  "source": {
+    "type": "text_source",
+    "text": "במדינה מסוימת שררו במשך שנים אבטלה גבוהה ומתחים חברתיים עמוקים. יום אחד נרצח פקיד ממשל בכיר, והממשלה הכריזה מיד על מלחמה בשכנתה. חוקרים מציינים כי הרצח שימש כ\"טריגר\", אך המתחים ארוכי־הטווח הם שהפכו את המלחמה לאפשרית."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "על פי הקטע, מהי העילה (הטריגר המיידי) לפרוץ המלחמה?",
+      "options": [
+        { "id": "a", "text": "רצח הפקיד הבכיר", "correct": true },
+        { "id": "b", "text": "האבטלה הגבוהה", "correct": false },
+        { "id": "c", "text": "המתחים החברתיים ארוכי־הטווח", "correct": false },
+        { "id": "d", "text": "הכרזת השכנה", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד קבע שהרצח הוא הסיבה למלחמה. אבחן את הבלבול והסבר לו את ההבדל בין עילה (האירוע שהצית את השרשרת) לבין הסיבות העמוקות שהכשירו את הקרקע — ולמה חשוב לא לבלבל ביניהן.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "לפי הקטע, אילו גורמים הם הסיבות העמוקות שאפשרו את המלחמה?",
+      "options": [
+        { "id": "a", "text": "האבטלה הגבוהה והמתחים החברתיים", "correct": true },
+        { "id": "b", "text": "רצח הפקיד בלבד", "correct": false },
+        { "id": "c", "text": "מזג האוויר", "correct": false },
+        { "id": "d", "text": "לא מוזכרות סיבות עמוקות", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מסיק ש\"מכיוון שהמלחמה פרצה מיד אחרי הרצח, הרצח לבדו גרם לה\". אבחן את כשל החשיבה (רצף בזמן אינו הוכחה לסיבתיות) והסבר לו כיצד להבחין בין מה שקדם למאורע לבין מה שגרם לו.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "אירוע היסטורי נובע בדרך כלל מ:",
+      "options": [
+        { "id": "a", "text": "כמה סיבות שפועלות יחד", "correct": true },
+        { "id": "b", "text": "סיבה אחת ויחידה תמיד", "correct": false },
+        { "id": "c", "text": "מקריות בלבד, בלי סיבות", "correct": false },
+        { "id": "d", "text": "רק החלטה של אדם אחד", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד, בעזרת הדוגמה שבקטע, מדוע לאירוע היסטורי יש בדרך כלל כמה סיבות הפועלות יחד — ומדוע חיפוש \"הסיבה האחת\" הוא לרוב פשטני.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

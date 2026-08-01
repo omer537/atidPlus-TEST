@@ -1,0 +1,76 @@
+{
+  "chapter_id": "science_density_states_01",
+  "subject": "מדעים לחטיבה",
+  "archetype": "decode",
+  "level": null,
+  "topic": "צפיפות ומצבי צבירה",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח (חט\"ב)",
+  "display_title": "מדעים לחטיבה — צפיפות ומצבי צבירה",
+  "source": {
+    "type": "text_source",
+    "text": "צפיפות = מסה חלקי נפח: [[frac:מסה|נפח]]. גוף צף בנוזל אם צפיפותו קטֵנה מצפיפות הנוזל, ושוקע אם היא גדולה יותר. הצפיפות היא תכונה של החומר ואינה תלויה בכמות. במצב גז החלקיקים רחוקים ונעים מהר; במוצק הם צפופים ונייחים יחסית."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "גוף צף על פני מים. מה נכון לגבי צפיפותו?",
+      "options": [
+        { "id": "a", "text": "קטֵנה מצפיפות המים", "correct": true },
+        { "id": "b", "text": "גדולה מצפיפות המים", "correct": false },
+        { "id": "c", "text": "שווה בדיוק לצפיפות המים", "correct": false },
+        { "id": "d", "text": "לגוף צף אין צפיפות", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בטוח ש\"דברים כבדים שוקעים וקלים צפים\". אבחן את התפיסה והסבר לו, בעזרת דוגמה נגדית (בול עץ ענק צף, מסמר קטן שוקע), מדוע מה שקובע הוא הצפיפות ולא המשקל.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "חותכים גוש ברזל לשני חצאים שווים. מה קורה לצפיפות של כל חצי?",
+      "options": [
+        { "id": "a", "text": "נשארת זהה", "correct": true },
+        { "id": "b", "text": "קטֵנה לחצי", "correct": false },
+        { "id": "c", "text": "גדֵלה פי שניים", "correct": false },
+        { "id": "d", "text": "הופכת לאפס", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב ש\"חצי מהגוש = חצי מהצפיפות\". אבחן את הטעות והסבר לו מדוע גם המסה וגם הנפח קטֵנים באותה מידה, ולכן היחס ביניהם (הצפיפות) נשאר זהה — תכונה של החומר עצמו.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "כיצד מסודרים ונעים החלקיקים בגז?",
+      "options": [
+        { "id": "a", "text": "רחוקים זה מזה ונעים מהר לכל הכיוונים", "correct": true },
+        { "id": "b", "text": "צפופים ונייחים כמו במוצק", "correct": false },
+        { "id": "c", "text": "מסודרים בשורות קבועות", "correct": false },
+        { "id": "d", "text": "אינם נעים כלל", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד, בעזרת מודל החלקיקים, את ההבדל בין מוצק, נוזל וגז — מה קורה למרחק בין החלקיקים ולמהירותם, וכיצד זה מסביר למשל מדוע גז ממלא את כל הכלי.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

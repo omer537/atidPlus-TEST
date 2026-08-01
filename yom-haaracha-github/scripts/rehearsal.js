@@ -59,7 +59,8 @@ async function main() {
       subjects, math_level: subjects.includes('מתמטיקה') ? ['5', '4', '3'][i % 3] : null,
       declaration: {},
     });
-    if (r.ok) examinees.push({ code, name: 'נבחן ' + (i + 1), token: r.data.token, subjects });
+    // code = הקוד האישי (pin) להתחברות; internalCode = המזהה הפנימי לפעולות מנהל (מסך המנהל משתמש בו).
+    if (r.ok) examinees.push({ code, internalCode: r.data.state.examinee.code, name: 'נבחן ' + (i + 1), token: r.data.token, subjects });
   }
   check(examinees.length === N, `נרשמו ${examinees.length}/${N} נבחנים`);
 
@@ -71,9 +72,9 @@ async function main() {
     // מסמנים לריאיון את מי שעדיין לא התראיין (חלוקה שווה על פני הסבבים)
     for (let i = 0; i < examinees.length; i++) {
       const ex = examinees[i];
-      if (!interviewed.has(ex.code) && (i % 5) + 1 === round) {
-        await api('/examiner/mark-interview', 'POST', { code: ex.code, round, on: true }, examinerToken);
-        interviewed.add(ex.code);
+      if (!interviewed.has(ex.internalCode) && (i % 5) + 1 === round) {
+        await api('/examiner/mark-interview', 'POST', { code: ex.internalCode, round, on: true }, examinerToken);
+        interviewed.add(ex.internalCode);
       }
     }
     const st1 = await api('/examiner/start-round', 'POST', { round }, examinerToken);

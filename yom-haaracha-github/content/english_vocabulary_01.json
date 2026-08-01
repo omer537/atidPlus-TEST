@@ -1,0 +1,76 @@
+{
+  "chapter_id": "english_vocabulary_01",
+  "subject": "אנגלית",
+  "archetype": "decode",
+  "level": null,
+  "topic": "Vocabulary in context",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח",
+  "display_title": "אנגלית — אוצר מילים מהקשר",
+  "source": {
+    "type": "text_source",
+    "text": "The hikers were exhausted after the long climb, but the breathtaking view from the summit made every difficult step worthwhile. They all agreed it was the most rewarding trip they had ever taken."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "In the text, the word \"rewarding\" most nearly means:",
+      "options": [
+        { "id": "a", "text": "satisfying — worth the effort", "correct": true },
+        { "id": "b", "text": "giving money as a prize", "correct": false },
+        { "id": "c", "text": "very expensive", "correct": false },
+        { "id": "d", "text": "tiring and difficult", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד בחר \"giving money as a prize\" כי המילה rewarding מכילה את reward (פרס). אבחן את הרגל הקריאה הזה, והסבר לו כיצד להשתמש בהקשר של המשפט כדי למצוא את המשמעות הנכונה.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "In the text, \"breathtaking\" most nearly means:",
+      "options": [
+        { "id": "a", "text": "amazing and impressive", "correct": true },
+        { "id": "b", "text": "hard to breathe", "correct": false },
+        { "id": "c", "text": "dangerous", "correct": false },
+        { "id": "d", "text": "very cold", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מבין את שאר המילים במשפט, אך \"נתקע\" מול מילה אחת שאינו מכיר. הסבר לו אסטרטגיה מעשית: כיצד להיעזר במילים וברעיונות שסביב המילה הלא־מוכרת כדי לנחש את משמעותה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "How did the hikers feel about the trip overall?",
+      "options": [
+        { "id": "a", "text": "It was worth it, even though it was hard.", "correct": true },
+        { "id": "b", "text": "It was a complete waste of time.", "correct": false },
+        { "id": "c", "text": "It was easy and relaxing.", "correct": false },
+        { "id": "d", "text": "They were sorry they went.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד ענה שהמטיילים לא נהנו, והצביע רק על המילה exhausted (\"מותשים\"). אבחן מדוע התמקדות במילה בודדת הטעתה אותו, והסבר כיצד לשקלל את כל המשפט (כולל worthwhile, rewarding) כדי להבין את הרגש הכולל.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

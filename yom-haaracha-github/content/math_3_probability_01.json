@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_3_probability_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "3",
+  "topic": "הסתברות",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · יישומי",
+  "display_title": "מתמטיקה 3 יח\"ל — הסתברות",
+  "source": {
+    "type": "rule",
+    "text": "בכל יום הגלים הם מאחד משלושה סוגים בלבד: נמוכים, בינוניים או גבוהים — ולכן סכום שלוש ההסתברויות הוא \\(1\\). לימים בלתי־תלויים, ההסתברות שבשניהם יקרה אותו דבר = מכפלת ההסתברויות. \"לפחות אחד\" = \\(1\\) פחות ההסתברות שאף אחד לא קרה."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "ההסתברות לגלים נמוכים היא \\(0.6\\) ולגלים בינוניים \\(0.25\\). מהי ההסתברות לגלים גבוהים?",
+      "options": [
+        { "id": "a", "text": "0.15", "correct": true },
+        { "id": "b", "text": "0.4", "correct": false },
+        { "id": "c", "text": "0.35", "correct": false },
+        { "id": "d", "text": "0.85", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד לא מבין למה ההסתברויות של שלושת סוגי הגלים חייבות להסתכם בדיוק ל-\\(1\\). הסבר לו את העיקרון הזה, וכיצד הוא עוזר למצוא את ההסתברות החסרה.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "בשני ימים בלתי־תלויים, מהי ההסתברות שבשניהם יהיו גלים נמוכים?",
+      "options": [
+        { "id": "a", "text": "0.36", "correct": true },
+        { "id": "b", "text": "0.6", "correct": false },
+        { "id": "c", "text": "1.2", "correct": false },
+        { "id": "d", "text": "0.3", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שההסתברות ששני הימים יהיו נמוכים היא \\(0.6\\) — בדיוק כמו ליום בודד. הסבר לו מדוע הדרישה ששני הימים יהיו נמוכים היא מחמירה יותר, ולכן ההסתברות דווקא קטֵנה, ומדוע מכפילים.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "ההסתברות לגלוש ביום מסוים היא \\(0.4\\). בשני ימים בלתי־תלויים, מהי ההסתברות לגלוש לפחות ביום אחד?",
+      "options": [
+        { "id": "a", "text": "0.64", "correct": true },
+        { "id": "b", "text": "0.8", "correct": false },
+        { "id": "c", "text": "0.16", "correct": false },
+        { "id": "d", "text": "0.36", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חישב \"לפחות ביום אחד\" כ-\\(0.4+0.4=0.8\\). הסבר לו איזו טעות של \"ספירה כפולה\" נכנסת כשמחברים, ומדוע נוח ונכון יותר לחשב \\(1\\) פחות ההסתברות שבאף יום לא גלש.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

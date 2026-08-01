@@ -64,12 +64,29 @@ window.AdminApp = (function () {
       '<span style="color:var(--muted);font-size:14px">· מסך מנהל</span>' +
       '<div class="spacer"></div>' +
       '<button class="btn ghost small" id="btn-health">תקינות בנק התוכן</button>' +
+      '<button class="btn small" id="btn-roster" title="שמות, קודים אישיים וסבב ריאיון — לגיבוי אצלך">רשימת נבחנים וקודים</button>' +
       '<button class="btn small" id="btn-excel" title="כל התשובות כאקסל">הורד תשובות (Excel)</button>' +
       '<button class="btn ghost small" id="btn-export" title="גיבוי JSON לבדיקת AI">JSON</button>' +
       '<button class="btn ghost small" id="btn-logout">יציאה</button></div>' +
       '<div id="ended-banner"></div>' +
       // קונסולת הסבב
       '<div class="card"><div id="console"></div></div>' +
+      // לוח תכנון — מי בריאיון בכל אחד מ-5 הסבבים
+      '<div class="card"><div class="toolbar"><h2 class="section-title">לוח תכנון — מי בריאיון בכל סבב</h2>' +
+      '<span class="spacer"></span><button class="btn ghost small" id="btn-autosplit">חלק לקבוצות</button></div>' +
+      '<p class="hint-text">בטבלת הנבחנים למטה קובעים לכל אחד באיזה סבב הריאיון שלו (הכפתורים 1–5). כאן רואים את התמונה המלאה. אפשר לשנות לפני שסבב מתחיל; סבב שרץ/הסתיים נעול. הפרקים מסתדרים אוטומטית מסביב.</p>' +
+      '<div class="plan-cols" id="planboard"></div></div>' +
+      // מטריצה מלאה — נבחן × 5 סבבים
+      '<div class="card"><div class="toolbar"><h2 class="section-title">מטריצה מלאה — נבחן × סבב</h2>' +
+      '<span class="spacer"></span><button class="btn ghost small" id="btn-matrix-toggle">הסתר</button></div>' +
+      '<div class="matrix-legend">' +
+      '<span><span class="sw" style="background:rgba(69,184,78,0.5)"></span>נעשה</span>' +
+      '<span><span class="sw" style="background:var(--teal)"></span>עכשיו</span>' +
+      '<span><span class="sw" style="background:#3a4788"></span>ריאיון</span>' +
+      '<span><span class="sw" style="border:1px dashed #6b76b0"></span>צפי (טרם נקבע)</span>' +
+      '</div>' +
+      '<p class="hint-text">עבר והווה מוצגים כפי שקרו בפועל; סבבים עתידיים הם <b>צפי</b> בלבד (נקבעים סופית כשהסבב מתחיל). לחיצה על תא פותחת את כרטיס הנבחן.</p>' +
+      '<div style="overflow-x:auto" id="matrix"></div></div>' +
       // רשימת הנבחנים + סטטוס
       '<div class="card" style="margin-top:20px"><div class="toolbar"><h2 class="section-title">נבחנים וסטטוס</h2>' +
       '<span class="spacer"></span><span id="summary" class="health-list"></span></div>' +
@@ -83,12 +100,12 @@ window.AdminApp = (function () {
       '<div style="display:flex;gap:24px;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:260px"><b>הוספת נבחן יחיד</b>' +
       '<label class="field" style="margin-top:10px"><span>שם</span><input id="add-name" type="text"></label>' +
-      '<label class="field"><span>קוד אישי</span><input id="add-code" type="text"></label>' +
+      '<label class="field"><span>קוד אישי (לא חובה)</span><input id="add-code" type="text" placeholder="ריק = הנבחן בוחר בכניסה"></label>' +
       '<label class="field"><span>סבב ריאיון (לא חובה)</span><select id="add-iround"><option value="">— ללא —</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>' +
       '<div class="chips" id="add-subjects" style="margin-bottom:10px"></div>' +
       '<button class="btn small" id="add-one">הוסף נבחן</button></div>' +
       '<div style="flex:1;min-width:260px"><b>הוספת רשימה שלמה</b>' +
-      '<p class="hint-text">שורה לכל נבחן: <span style="font-family:var(--mono)">שם, קוד</span> (אפשר להוסיף סבב: <span style="font-family:var(--mono)">שם, קוד, סבב</span>)</p>' +
+      '<p class="hint-text">שורה לכל נבחן: <span style="font-family:var(--mono)">שם</span> (הקוד לא חובה: <span style="font-family:var(--mono)">שם, קוד</span> או <span style="font-family:var(--mono)">שם, קוד, סבב</span>)</p>' +
       '<textarea id="bulk-text" placeholder="דנה כהן, 1234, 2&#10;יוסי לוי, 5678&#10;..." style="min-height:120px"></textarea>' +
       '<button class="btn small" id="add-bulk" style="margin-top:8px">הוסף רשימה</button></div>' +
       '<div style="flex:1;min-width:260px"><b>העלאת תכנון ריאיונות</b>' +
@@ -110,6 +127,7 @@ window.AdminApp = (function () {
       '</div>'
     ));
     document.getElementById('btn-logout').onclick = function () { localStorage.removeItem('yh_examiner_token'); token = null; if (pollHandle) clearInterval(pollHandle); leave(); };
+    document.getElementById('btn-roster').onclick = downloadRoster;
     document.getElementById('btn-excel').onclick = downloadExcel;
     document.getElementById('btn-export').onclick = downloadExport;
     document.getElementById('btn-health').onclick = toggleHealth;
@@ -119,7 +137,67 @@ window.AdminApp = (function () {
     document.getElementById('plan-load').onclick = loadPlan;
     document.getElementById('btn-end-exam').onclick = endExam;
     document.getElementById('btn-full-reset').onclick = fullReset;
+    document.getElementById('btn-autosplit').onclick = autosplit;
+    var mt = document.getElementById('btn-matrix-toggle');
+    if (mt) mt.onclick = function () { matrixHidden = !matrixHidden; this.textContent = matrixHidden ? 'הצג' : 'הסתר'; refresh(); };
     renderAddSubjects();
+  }
+
+  async function autosplit() {
+    if (!confirm('לחלק אוטומטית לריאיון את מי שעדיין לא משובץ, שווה בשווה בין הסבבים הפתוחים?')) return;
+    try { var r = await call('/examiner/autosplit-interviews', 'POST', {}); alert('שובצו ' + r.assigned + ' נבחנים לריאיון.'); refresh(); }
+    catch (e) { alert(e.message); }
+  }
+
+  function renderPlanBoard(S) {
+    var box = document.getElementById('planboard'); if (!box) return;
+    var states = {}; S.rounds.forEach(function (r) { states[r.round] = r.state; });
+    var byRound = {}; for (var i = 1; i <= S.total_rounds; i++) byRound[i] = [];
+    S.examinees.forEach(function (e) { (e.marked_rounds || []).forEach(function (rn) { if (byRound[rn]) byRound[rn].push(e.name); }); });
+    var html = '';
+    for (var n = 1; n <= S.total_rounds; n++) {
+      var st = states[n] || 'planned';
+      var cls = st === 'running' ? 'running' : (st === 'ended' ? 'ended' : '');
+      var lbl = st === 'running' ? 'פועל' : (st === 'ended' ? 'הסתיים' : 'מתוכנן');
+      var names = byRound[n].length ? byRound[n].map(function (nm) { return '<span class="chip-name">' + esc(nm) + '</span>'; }).join('') : '<span style="color:var(--faint);font-size:12px">— ריק —</span>';
+      html += '<div class="plan-col ' + cls + '"><div class="pc-head"><span>סבב ' + n + '</span><small>' + byRound[n].length + ' · ' + lbl + '</small></div>' + names + '</div>';
+    }
+    box.innerHTML = html;
+  }
+
+  // ------------------------------------------------- מטריצה מלאה
+  var matrixHidden = false;
+  function renderMatrix(M) {
+    var box = document.getElementById('matrix'); if (!box) return;
+    if (matrixHidden) { box.innerHTML = ''; return; }
+    if (!M || !M.examinees.length) { box.innerHTML = '<p class="hint-text">אין נבחנים עדיין.</p>'; return; }
+    var states = {}; M.rounds.forEach(function (r) { states[r.round] = r.state; });
+    var head = '<th class="nm" style="min-width:130px">נבחן</th>';
+    for (var n = 1; n <= M.total_rounds; n++) {
+      var st = states[n] || 'planned';
+      var rc = st === 'running' ? ' class="rc"' : '';
+      var lbl = st === 'running' ? 'רץ עכשיו' : (st === 'ended' ? 'הסתיים' : 'מתוכנן');
+      head += '<th' + rc + '>סבב ' + n + '<small>' + lbl + '</small></th>';
+    }
+    var rows = M.examinees.map(function (e) {
+      var nm = '<td class="nm"><b>' + esc(e.name) + '</b>' +
+        (e.needs_interview_unplanned ? ' <span style="color:var(--warn);font-size:11px" title="עדיין לא שובץ ריאיון">⚑ ריאיון?</span>' : '') +
+        (e.left ? ' <small style="color:var(--danger)">(עזב)</small>' : '') +
+        (!e.setup ? '<small>טרם בחר מקצועות</small>' : '') + '</td>';
+      var tds = e.cells.map(function (c) {
+        if (!c) return '<td class="mx idle">—</td>';
+        var inner = c.label + (c.level ? ' <small style="opacity:.7">(' + esc(c.level) + ')</small>' : '');
+        if (c.type === 'done') inner = '<span class="ck">✓</span> ' + esc(c.label);
+        else inner = esc(c.label) + (c.level ? ' <small style="opacity:.7">' + esc(c.level) + '</small>' : '');
+        var clickable = c.type !== 'idle';
+        return '<td class="mx ' + c.type + '"' + (clickable ? ' data-c="' + esc(e.code) + '"' : '') + '>' + inner + '</td>';
+      }).join('');
+      return '<tr class="' + (e.left ? 'mx-left' : '') + '">' + nm + tds + '</tr>';
+    }).join('');
+    box.innerHTML = '<table class="matrix"><thead><tr>' + head + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    box.querySelectorAll('td.mx[data-c]').forEach(function (td) {
+      td.onclick = function () { openCard(td.getAttribute('data-c')); };
+    });
   }
 
   // ------------------------------------------------- קונסולת הסבב
@@ -198,80 +276,147 @@ window.AdminApp = (function () {
   }
 
   // ------------------------------------------------- טבלת הנבחנים
+  function attnOf(S, e) {
+    if (e.left) return false;
+    if (e.current && e.current.kind === 'chapter' && e.current.status !== 'done' && e.timer && e.timer.state === 'expired') return true;
+    if (e.flags) return true;
+    if (e.needs_interview && (e.marked_rounds || []).length === 0) return true;
+    if (S.running && !e.setup) return true;
+    return false;
+  }
+
   function renderRoster(S) {
     var tb = document.getElementById('tbody'); if (!tb) return;
-    var planning = window.__planningRound; // סבב שאפשר לסמן אליו (null אם רץ סבב)
+    var states = {}; S.rounds.forEach(function (r) { states[r.round] = r.state; });
     var hint = document.getElementById('roster-hint');
-    if (hint) hint.innerHTML = planning
-      ? 'הסבב הבא להתחלה הוא <b>סבב ' + planning + '</b>. סמנו בעמודת "לריאיון?" מי יוצא לריאיון בסבב הזה, ואז לחצו "התחל סבב" למעלה.'
-      : (S.running ? 'סבב <b>' + S.running + '</b> פועל. הסימון נעול עד לסיום הסבב. אפשר לבצע פעולות פרטניות לכל נבחן.' : '');
+    if (hint) hint.innerHTML = S.running
+      ? 'סבב <b>' + S.running + '</b> פועל. סבב שכבר התחיל/הסתיים נעול לסימון. לחצו "כרטיס" לטיפול פרטני בנבחן.'
+      : 'קבעו לכל נבחן באיזה סבב הריאיון שלו (כפתורים 1–5). לחצו "כרטיס" לפרטים ולפעולות פרטניות.';
 
-    tb.innerHTML = S.examinees.map(function (e) {
-      // עמודת סימון לריאיון
-      var markCell;
-      if (!e.setup) markCell = '<span style="color:var(--faint)">טרם נרשם</span>';
-      else if (e.interviewed) markCell = '<span style="color:var(--ok)">התראיין ✓</span>';
-      else if (planning) {
-        var checked = e.marked_rounds.indexOf(planning) >= 0 ? 'checked' : '';
-        markCell = '<label class="mark-toggle"><input type="checkbox" class="iv-toggle" data-c="' + esc(e.code) + '" ' + checked + '> לריאיון</label>';
-      } else markCell = e.marked_rounds.length ? ('מסומן לסבב ' + e.marked_rounds.join(',')) : '<span style="color:var(--faint)">—</span>';
+    var rows = S.examinees.slice().sort(function (a, b) { return (attnOf(S, b) ? 1 : 0) - (attnOf(S, a) ? 1 : 0); });
 
-      // סטטוס: עשה / נותר / ריאיון
+    tb.innerHTML = rows.map(function (e) {
+      var ivCell;
+      if (!e.setup) ivCell = '<span style="color:var(--faint);font-size:12px">טרם נרשם</span>';
+      else if (e.interviewed) ivCell = '<span style="color:var(--ok)">התראיין ✓</span>';
+      else {
+        var btns = '';
+        for (var n = 1; n <= S.total_rounds; n++) {
+          var on = e.marked_rounds.indexOf(n) >= 0;
+          var locked = states[n] && states[n] !== 'planned';
+          btns += '<button class="' + (on ? 'on' : '') + '" data-c="' + esc(e.code) + '" data-r="' + n + '"' + (locked ? ' disabled' : '') + '>' + n + '</button>';
+        }
+        ivCell = '<div class="rbtns" title="באיזה סבב הריאיון שלו">' + btns + '</div>';
+      }
+
       var doneTxt = e.chapters_done.length ? e.chapters_done.join(', ') : '—';
       var remTxt = e.remaining_chapters.length ? e.remaining_chapters.join(', ') : '—';
       var ivTxt = e.interviewed ? '<span style="color:var(--ok)">התראיין ✓</span>' : '<span style="color:var(--warn)">טרם התראיין</span>';
-      var status = '<div style="font-size:12px;line-height:1.7">' +
-        '<div>עשה: ' + esc(doneTxt) + '</div>' +
-        '<div>נותר: ' + esc(remTxt) + '</div>' +
-        '<div>' + ivTxt + (e.finished ? ' · <span style="color:var(--ok)">סיים הכול</span>' : '') + '</div></div>';
+      var status = '<div style="font-size:12px;line-height:1.7"><div>עשה: ' + esc(doneTxt) + '</div><div>נותר: ' + esc(remTxt) + '</div><div>' + ivTxt + (e.finished ? ' · <span style="color:var(--ok)">סיים הכול</span>' : '') + (e.left ? ' · <span style="color:var(--faint)">עזב</span>' : '') + '</div></div>';
 
-      // עכשיו
       var now = '—';
-      if (e.current) {
+      if (e.in_interview) now = '<span class="pill interview">בריאיון</span>';
+      else if (e.current) {
         if (e.current.kind === 'interview') now = '<span class="pill interview">בריאיון</span>';
         else if (e.current.status === 'done') now = '<span class="pill done">הגיש</span>';
         else now = '<span class="pill chapter">' + esc(e.current.subject || '') + (e.current.level ? ' · ' + e.current.level : '') + '</span>' + (e.current.not_comfortable ? ' <span title="לא בנוח" style="color:var(--warn)">⚑</span>' : '');
       } else if (!e.setup) now = '<span style="color:var(--faint)">ממתין לרישום</span>';
 
-      var timeCell = (e.current && e.current.kind === 'chapter' && e.current.status !== 'done')
+      var timeCell = (!e.in_interview && e.current && e.current.kind === 'chapter' && e.current.status !== 'done')
         ? '<span class="t-' + (e.timer.state || 'none') + ' pill mono">' + fmtTime(e.timer.remaining_sec) + '</span>' : '<span style="color:var(--faint)">—</span>';
       var flags = e.flags ? '<span class="stat"><span class="dot-flag"></span>' + e.flags + '</span>' : '<span style="color:var(--faint)">0</span>';
+      var cardBtn = '<button class="btn ghost small open-card" data-c="' + esc(e.code) + '">כרטיס</button>';
+      var cls = (attnOf(S, e) ? 'attn' : '') + (e.left ? ' left-row' : '');
 
-      var actions = '<div class="mini-actions">' +
-        '<button data-a="add_time" data-c="' + esc(e.code) + '" title="הוסף 2 דקות">+2 דק׳</button>' +
-        '<button data-a="pause" data-c="' + esc(e.code) + '" title="השהה טיימר">השהה</button>' +
-        '<button data-a="resume" data-c="' + esc(e.code) + '" title="המשך טיימר">המשך</button>' +
-        '<button data-a="reset_slot" data-c="' + esc(e.code) + '" title="התחל לו את המשבצת מחדש">אפס לו</button>' +
-        '<button class="fin" data-a="finish" data-c="' + esc(e.code) + '" title="סיים לו את המשבצת עכשיו">סיים לו</button>' +
-        '<button class="fin" data-a="remove" data-c="' + esc(e.code) + '" title="הסר נבחן">✕</button>' +
-        '</div>';
-
-      return '<tr><td>' + esc(e.name) + '</td><td>' + markCell + '</td><td>' + status + '</td><td>' + now + '</td><td>' + timeCell + '</td><td>' + flags + '</td><td>' + actions + '</td></tr>';
+      return '<tr class="' + cls.trim() + '"><td>' + esc(e.name) + '</td><td>' + ivCell + '</td><td>' + status + '</td><td>' + now + '</td><td>' + timeCell + '</td><td>' + flags + '</td><td>' + cardBtn + '</td></tr>';
     }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--faint);padding:30px">אין נבחנים עדיין. הוסיפו בחלק "ניהול נבחנים".</td></tr>';
 
     var iv = S.examinees.filter(function (e) { return e.interviewed; }).length;
-    document.getElementById('summary').innerHTML = S.examinees.length + ' נבחנים · התראיינו: ' + iv + ' · ממתינים לריאיון: ' + S.examinees.filter(function (e) { return e.needs_interview; }).length;
+    var need = S.examinees.filter(function (e) { return e.needs_interview; }).length;
+    document.getElementById('summary').innerHTML = S.examinees.length + ' נבחנים · התראיינו: ' + iv + ' · ממתינים לריאיון: ' + need;
 
-    tb.querySelectorAll('.iv-toggle').forEach(function (chk) {
-      chk.onchange = function () {
-        call('/examiner/mark-interview', 'POST', { code: chk.getAttribute('data-c'), round: planning, on: chk.checked })
-          .then(function (r) { if (r && r.warn) { alert(r.warn); } refresh(); })
-          .catch(function (e) { alert(e.message); refresh(); });
+    tb.querySelectorAll('.rbtns button').forEach(function (b) {
+      if (b.disabled) return;
+      b.onclick = function () {
+        var on = !b.classList.contains('on');
+        call('/examiner/mark-interview', 'POST', { code: b.getAttribute('data-c'), round: Number(b.getAttribute('data-r')), on: on })
+          .then(function (r) { if (r && r.warn) alert(r.warn); refresh(); }).catch(function (e) { alert(e.message); refresh(); });
       };
     });
-    tb.querySelectorAll('.mini-actions button').forEach(function (btn) {
-      btn.onclick = function () {
-        var action = btn.getAttribute('data-a'), code = btn.getAttribute('data-c');
-        if (action === 'remove') {
-          if (!confirm('להסיר את הנבחן? כל הנתונים שלו יימחקו.')) return;
-          call('/examiner/remove-examinee', 'POST', { code: code }).then(refresh).catch(function (e) { alert(e.message); });
-          return;
-        }
-        var payload = { code: code, action: action };
-        if (action === 'add_time') payload.seconds = 120;
-        call('/examiner/override', 'POST', payload).then(refresh).catch(function (e) { alert(e.message); });
-      };
-    });
+    tb.querySelectorAll('.open-card').forEach(function (b) { b.onclick = function () { openCard(b.getAttribute('data-c')); }; });
+  }
+
+  // ------------------------------------------------- כרטיס נבחן (מודאל)
+  function openCard(code) { window.__openCardCode = code; renderCard(code); }
+  function closeCard() { window.__openCardCode = null; var m = document.getElementById('card-modal'); if (m) m.remove(); }
+  function renderCard(code) {
+    var e = STATE && STATE.examinees.find(function (x) { return x.code === code; });
+    if (!e) { closeCard(); return; }
+    var m = document.getElementById('card-modal');
+    if (!m) { m = el('<div class="modal-back" id="card-modal"></div>'); document.body.appendChild(m); m.onclick = function (ev) { if (ev.target === m) closeCard(); }; }
+    var tl = '';
+    e.chapters_done.forEach(function (s) { tl += '<span class="tl done">✓ ' + esc(s) + '</span>'; });
+    if (e.interviewed) tl += '<span class="tl done">✓ ריאיון</span>';
+    if (e.in_interview) tl += '<span class="tl now">▶ בריאיון</span>';
+    else if (e.current) { var lab = e.current.kind === 'interview' ? 'ריאיון' : esc(e.current.subject || ''); tl += '<span class="tl now">▶ ' + lab + (e.timer && e.timer.state === 'running' ? ' ' + fmtTime(e.timer.remaining_sec) : '') + '</span>'; }
+    e.remaining_chapters.forEach(function (s) { tl += '<span class="tl pending">' + esc(s) + '</span>'; });
+    if (!e.interviewed && !e.in_interview && !(e.current && e.current.kind === 'interview')) tl += '<span class="tl pending">ריאיון</span>';
+
+    var actions =
+      '<button class="btn" data-x="advance">קדם לפעילות הבאה</button>' +
+      (e.in_interview ? '<button class="btn" data-x="ireturn">חזר מריאיון</button>' : '<button class="btn ghost" data-x="iout">שלח לריאיון עכשיו</button>') +
+      '<button class="btn ghost" data-x="add_time">הוסף 2 דקות</button>' +
+      '<button class="btn ghost" data-x="reset_slot">אפס משבצת</button>' +
+      '<button class="btn ghost" data-x="reopen">פתח הגשה מחדש</button>' +
+      (e.left ? '<button class="btn ghost" data-x="unleft">החזר לפעילות</button>' : '<button class="btn ghost" data-x="left">סמן: עזב</button>') +
+      '<button class="btn danger" data-x="remove">הסר נבחן</button>';
+
+    var ivText = (e.marked_rounds && e.marked_rounds.length) ? ('סבב ' + e.marked_rounds.join(', ')) : (e.interviewed ? 'התראיין ✓' : 'טרם נקבע');
+    var editing = window.__cardEditing === code;
+    var meta = editing
+      ? '<div class="mc-edit" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;background:rgba(255,255,255,.03);padding:10px;border-radius:10px">' +
+          '<label class="field" style="margin:0;flex:1;min-width:150px"><span>שם</span><input id="edit-name" type="text" value="' + esc(e.name) + '"></label>' +
+          '<label class="field" style="margin:0;flex:1;min-width:120px"><span>קוד אישי</span><input id="edit-pin" type="text" value="' + esc(e.pin || '') + '" placeholder="ריק = לפי שם בלבד"></label>' +
+          '<button class="btn small" data-x="save_edit">שמור</button>' +
+          '<button class="btn ghost small" data-x="cancel_edit">בטל</button>' +
+        '</div>'
+      : '<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;background:rgba(35,179,164,.08);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:12px;font-size:14px">' +
+          '<div>קוד אישי <span style="color:var(--faint);font-size:12px">(סיסמה)</span>: <b style="font-size:16px;font-family:var(--mono)">' + esc(e.pin || '—') + '</b></div>' +
+          '<div>סבב ריאיון: <b>' + esc(ivText) + '</b></div>' +
+          '<div style="color:var(--muted)">מקצועות: ' + esc((e.subjects || []).join(', ') || 'טרם בחר') + '</div>' +
+          '<span style="flex:1"></span>' +
+          '<button class="btn ghost small" data-x="edit">ערוך שם/קוד</button></div>';
+
+    m.innerHTML = '<div class="modal-card">' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><h2 style="margin:0;font-size:20px">' + esc(e.name) + '</h2><span style="flex:1"></span><button class="btn ghost small" id="card-close">סגור</button></div>' +
+      meta +
+      '<div style="font-size:13px;color:var(--muted)">מסלול</div><div class="timeline">' + (tl || '<span style="color:var(--faint)">—</span>') + '</div>' +
+      '<div style="font-size:13px;color:var(--muted);margin-top:12px">טיפול פרטני (לא משפיע על שאר הכיתה)</div>' +
+      '<div class="mc-actions">' + actions + '</div></div>';
+    document.getElementById('card-close').onclick = closeCard;
+    m.querySelectorAll('.mc-actions button, .mc-edit button, [data-x="edit"]').forEach(function (b) { b.onclick = function () { cardAction(code, b.getAttribute('data-x')); }; });
+  }
+  async function cardAction(code, x) {
+    try {
+      if (x === 'edit') { window.__cardEditing = code; renderCard(code); return; }
+      else if (x === 'cancel_edit') { window.__cardEditing = null; renderCard(code); return; }
+      else if (x === 'save_edit') {
+        var newName = document.getElementById('edit-name').value.trim();
+        var newPin = document.getElementById('edit-pin').value.trim();
+        await call('/examiner/edit-examinee', 'POST', { code: code, name: newName, pin: newPin });
+        window.__cardEditing = null; refresh(); return;
+      }
+      else if (x === 'advance') { var r = await call('/examiner/advance-examinee', 'POST', { code: code }); if (r.warn) alert(r.warn); }
+      else if (x === 'iout') await call('/examiner/interview-out', 'POST', { code: code });
+      else if (x === 'ireturn') await call('/examiner/interview-return', 'POST', { code: code });
+      else if (x === 'reopen') await call('/examiner/reopen-submit', 'POST', { code: code });
+      else if (x === 'left') await call('/examiner/set-left', 'POST', { code: code, left: true });
+      else if (x === 'unleft') await call('/examiner/set-left', 'POST', { code: code, left: false });
+      else if (x === 'remove') { if (!confirm('להסיר את הנבחן? כל הנתונים שלו יימחקו.')) return; await call('/examiner/remove-examinee', 'POST', { code: code }); closeCard(); }
+      else if (x === 'add_time') await call('/examiner/override', 'POST', { code: code, action: 'add_time', seconds: 120 });
+      else if (x === 'reset_slot') await call('/examiner/override', 'POST', { code: code, action: 'reset_slot' });
+      refresh();
+    } catch (e) { alert(e.message); }
   }
 
   // ------------------------------------------------- פעולות סבב
@@ -335,7 +480,7 @@ window.AdminApp = (function () {
   async function addOne() {
     var name = document.getElementById('add-name').value.trim(), code = document.getElementById('add-code').value.trim();
     var iround = document.getElementById('add-iround').value, box = document.getElementById('add-msg');
-    if (!name || !code) { box.innerHTML = '<div class="msg error">יש למלא שם וקוד.</div>'; return; }
+    if (!name) { box.innerHTML = '<div class="msg error">יש למלא שם.</div>'; return; }
     try {
       await call('/examiner/add-examinee', 'POST', { name: name, code: code, subjects: addSubjects.slice(), interview_round: iround || undefined });
       box.innerHTML = '<div class="msg info">נוסף: ' + esc(name) + '.</div>';
@@ -387,6 +532,7 @@ window.AdminApp = (function () {
     a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
   function downloadBackup(name) { downloadBlob('/examiner/backup/' + encodeURIComponent(name), name).catch(function (e) { alert(e.message); }); }
+  function downloadRoster() { downloadBlob('/examiner/export-roster', 'examinees-roster.xlsx').catch(function (e) { alert(e.message); }); }
   function downloadExcel() { downloadBlob('/examiner/export-excel', 'assessment-answers.xlsx').catch(function (e) { alert(e.message); }); }
   function downloadExport() { downloadBlob('/examiner/export-all', 'assessment-answers.json').catch(function (e) { alert(e.message); }); }
 
@@ -407,7 +553,12 @@ window.AdminApp = (function () {
   // ------------------------------------------------- לולאה
   async function refresh() {
     try { STATE = await call('/examiner/status'); } catch (e) { if (e.status === 401) return renderLogin('פג תוקף. התחבר/י מחדש.'); return; }
-    renderConsole(STATE); renderRoster(STATE); renderExamState();
+    var M = null;
+    if (!matrixHidden) { try { M = await call('/examiner/matrix'); } catch (e) { /* אל תשבור את הרענון */ } }
+    try {
+      renderConsole(STATE); renderPlanBoard(STATE); renderMatrix(M); renderRoster(STATE); renderExamState();
+      if (window.__openCardCode) renderCard(window.__openCardCode);
+    } catch (e) { /* לא לשבור את הלולאה בגלל שגיאת רינדור */ }
   }
   async function start() {
     try { availableSubjects = (await call('/subjects')).subjects || []; } catch (e) { availableSubjects = []; }

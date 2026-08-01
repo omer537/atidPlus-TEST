@@ -1,0 +1,76 @@
+{
+  "chapter_id": "math_3_growth_01",
+  "subject": "מתמטיקה",
+  "archetype": "prior_knowledge",
+  "level": "3",
+  "topic": "גדילה מעריכית ואחוזים",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · יישומי",
+  "display_title": "מתמטיקה 3 יח\"ל — גדילה מעריכית ואחוזים",
+  "source": {
+    "type": "rule",
+    "text": "נוסחת גדילה: \\(A=A_0\\left(1+\\dfrac{p}{100}\\right)^{n}\\). מקרא: \\(A_0\\) הכמות ההתחלתית, \\(p\\) אחוז הגדילה בשנה, \\(n\\) מספר השנים, \\(A\\) הכמות בסוף. אחוז שינוי מחושב ביחס לערך ההתחלתי."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "באי היו \\(20000\\) תוכים, והמספר גדל ב-\\(8\\%\\) בשנה. איזה ביטוי נותן את מספר התוכים כעבור שנה אחת?",
+      "options": [
+        { "id": "a", "tex": "20000\\cdot 1.08", "correct": true },
+        { "id": "b", "tex": "20000\\cdot 0.08", "correct": false },
+        { "id": "c", "tex": "20000+8", "correct": false },
+        { "id": "d", "tex": "20000\\cdot 1.8", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד הכפיל ב-\\(0.08\\) בלבד. הסבר לו מה מייצג ה-\\(1\\) שבתוך \\(1.08\\), ומה היה קורה למספר התוכים המקורי אילו היו מכפילים רק ב-\\(0.08\\).",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה ביטוי נותן את מספר התוכים כעבור \\(n\\) שנים?",
+      "options": [
+        { "id": "a", "tex": "20000\\cdot (1.08)^{n}", "correct": true },
+        { "id": "b", "tex": "20000\\cdot 1.08\\cdot n", "correct": false },
+        { "id": "c", "tex": "20000+1.08\\,n", "correct": false },
+        { "id": "d", "tex": "20000\\cdot (0.08)^{n}", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד מתקשה להבין למה מעלים את \\(1.08\\) בחזקת \\(n\\). הסבר לו מה מייצגת הכפלה חוזרת ב-\\(1.08\\), שנה אחר שנה, וכיצד זה מתקשר למספר השנים.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "כמות גדלה מ-\\(25\\) ל-\\(30\\). בכמה אחוזים היא גדלה?",
+      "options": [
+        { "id": "a", "text": "20%", "correct": true },
+        { "id": "b", "text": "16.6%", "correct": false },
+        { "id": "c", "text": "5%", "correct": false },
+        { "id": "d", "text": "50%", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חילק את ההפרש \\((30-25)\\) ב-\\(30\\) (הערך הסופי) וקיבל \\(16.6\\%\\). הסבר לו ביחס לאיזה ערך מחשבים אחוז שינוי — ההתחלתי או הסופי — ומדוע.",
+      "rubric": ["identifies_error", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}
