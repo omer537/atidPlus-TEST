@@ -631,6 +631,7 @@ app.post('/api/examiner/add-examinees-bulk', authExaminer, (req, res) => {
 // סימון/ביטול נבחן לריאיון בסבב מסוים (רק כשהסבב עדיין 'planned')
 app.post('/api/examiner/mark-interview', authExaminer, (req, res) => {
   const { code, round, on } = req.body || {};
+  if (!code) return res.status(400).json({ error: 'חסר קוד נבחן.' });
   const r = Number(round);
   if (!r || r < 1 || r > schedule.NUM_ROUNDS) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
   if (roundState(r) !== 'planned') return res.status(400).json({ error: 'אפשר לסמן רק סבב שעדיין לא התחיל.' });
@@ -736,6 +737,9 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
   makeBackup('pre-end-round');
   // מי שהמשבצת שלו בסבב זה היא ריאיון — מסומן "התראיין"
   db.prepare("UPDATE examinees SET interviewed = 1 WHERE code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(r);
+  // רשת ביטחון: נבחן שנשלח לריאיון-חי (in_interview) ולא הוחזר ידנית — בסיום הסבב נחשב כמי שהתראיין
+  // ומשוחרר, כדי שלא ייתקע על מסך הריאיון בסבב הבא.
+  db.prepare("UPDATE examinees SET interviewed = 1, in_interview = 0 WHERE in_interview = 1").run();
   // גוגל שיטס: לדחוף את התשובות של מי שלא לחץ "הגש" *לפני* סגירת הסבב —
   // כך אף תשובה לא נעדרת מהגיליון, ובלי כפילויות (המוגשים כבר 'done' ונדחפו בהגשה).
   if (SHEETS_WEBHOOK_URL) {

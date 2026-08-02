@@ -494,6 +494,7 @@
       '</div>'
     ) : '';
 
+    App.optSeed = (s.examinee && (s.examinee.code || s.examinee.name)) || '';
     var items = ch.items.map(function (it) {
       App.itemStart[it.id] = t;
       return renderItem(it, savedMap[it.id], !!dkMap[it.id]);
@@ -557,6 +558,19 @@
     text_teach_error: { t: 'זיהוי טעות והוראה · במילים', cls: 'teach' },
   };
 
+  // ערבוב יציב (דטרמיניסטי) של סדר האפשרויות — לפי (נבחן + מזהה שאלה), כדי שהתשובה
+  // הנכונה לא תהיה תמיד ראשונה, וכל נבחן יראה סדר אחר. ה-id של כל אפשרות נשמר, כך שהבדיקה תקינה.
+  function seededShuffle(arr, seedStr) {
+    // xmur3 hash → זרע · mulberry32 → מחולל אקראי איכותי (התפלגות אחידה)
+    var h = 1779033703 ^ seedStr.length;
+    for (var i = 0; i < seedStr.length; i++) { h = Math.imul(h ^ seedStr.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+    var s = (h ^ (h >>> 16)) >>> 0;
+    function rnd() { s = (s + 0x6D2B79F5) | 0; var t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
+    var a = arr.slice();
+    for (var j = a.length - 1; j > 0; j--) { var k = Math.floor(rnd() * (j + 1)); var t2 = a[j]; a[j] = a[k]; a[k] = t2; }
+    return a;
+  }
+
   function renderItem(it, saved, marked) {
     var lbl = TYPE_LABEL[it.type] || { t: it.type, cls: '' };
     var head = '<span class="qtype ' + lbl.cls + '">' + lbl.t + '</span>';
@@ -570,7 +584,7 @@
     if (it.prompt) body += '<div class="prompt">' + window.renderMathText(it.prompt) + '</div>';
 
     if (it.options) {
-      var opts = it.options.map(function (o) {
+      var opts = seededShuffle(it.options, (App.optSeed || '') + it.id).map(function (o) {
         var sel = saved === o.id;
         var label = o.tex ? window.renderMathText('\\(' + o.tex + '\\)') : window.renderMathText(o.text || '');
         return '<div class="option ' + (sel ? 'selected' : '') + '" data-item="' + esc(it.id) + '" data-opt="' + esc(o.id) + '">' +
