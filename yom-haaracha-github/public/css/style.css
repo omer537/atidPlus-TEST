@@ -400,9 +400,140 @@ table.matrix td.nm small { color: var(--faint); font-size: 11px; }
 .mx.idle:hover { transform: none; outline: none; }
 tr.mx-left { opacity: .45; }
 
+/* =========================================================================
+   מסך בדיקה (Grading)
+   ========================================================================= */
+/* רשימת מחזורים */
+.gr-cohort-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.gr-cohort { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; background: rgba(8,14,36,0.35); }
+.gr-cohort-main { flex: 1; min-width: 0; }
+.gr-cohort-name { font-weight: 700; font-size: 15px; }
+.gr-cohort-meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.gr-cohort-act { display: flex; gap: 8px; }
+
+/* מד התקדמות בדיקת AI */
+.gr-progress { position: relative; height: 26px; border-radius: 8px; background: rgba(8,14,36,0.5); border: 1px solid var(--border); overflow: hidden; margin: 8px 0 4px; }
+.gr-progress-bar { position: absolute; inset-inline-start: 0; top: 0; bottom: 0; background: var(--accent-grad); transition: width .3s; }
+.gr-progress-txt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 600; color: var(--text); }
+
+.gr-final { font-family: var(--mono); font-weight: 700; font-size: 16px; color: var(--teal); }
+tr.gr-locked td { background: rgba(69,184,78,0.05); }
+
+/* סרגל ציונים חי בכותרת הביקורת */
+.gr-scores { display: inline-flex; gap: 12px; align-items: center; }
+.gr-s { display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.gr-s small { font-size: 10px; color: var(--faint); }
+.gr-s b { font-family: var(--mono); font-size: 17px; }
+.gr-s.final b { color: var(--teal); font-size: 20px; }
+
+/* פרק בביקורת */
+.gr-chapter { padding: 18px 20px; }
+.gr-ch-head { font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gr-src { margin-top: 8px; }
+
+/* רב-ברירה בביקורת */
+.gr-mc { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 10px; background: rgba(8,14,36,0.3); }
+.gr-mc-q { font-size: 14.5px; margin-bottom: 5px; }
+.gr-mc-a { font-size: 13.5px; color: var(--muted); }
+.gr-ok { color: var(--ok); font-weight: 600; }
+.gr-bad { color: var(--danger); font-weight: 600; }
+
+/* «למד» בביקורת */
+.gr-teach { background: rgba(20,29,68,0.55); }
+.gr-answer { border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin: 10px 0; background: rgba(8,14,36,0.4); }
+.gr-answer-lbl { font-size: 11px; color: var(--faint); margin-bottom: 4px; }
+.gr-answer-body { font-size: 15px; line-height: 1.75; white-space: pre-wrap; }
+.gr-concl { font-size: 14px; margin: 8px 0; }
+.gr-concl b { color: var(--text); font-weight: 600; }
+.attn-strip { font-size: 13.5px; line-height: 1.6; background: rgba(247,183,49,0.1); border: 1px solid rgba(247,183,49,0.35); color: #fde9b8; border-radius: 10px; padding: 9px 13px; margin: 8px 0; }
+.attn-strip b { color: var(--warn); }
+
+/* קריטריונים + מחוון (pips) */
+.crit-box { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 6px; }
+.crit-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.crit-chip { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 9px; flex: none; }
+.crit-chip.content { color: var(--green); border: 1px solid rgba(69,184,78,0.5); background: rgba(69,184,78,0.08); }
+.crit-chip.teach { color: var(--teal); border: 1px solid var(--border-strong); background: rgba(35,179,164,0.08); }
+.crit-label { font-size: 13.5px; font-weight: 600; flex: 1; min-width: 120px; }
+.crit-ai { font-size: 11px; color: var(--faint); font-weight: 400; }
+.pips { display: inline-flex; gap: 4px; flex: none; }
+.pip { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; border-radius: 7px; background: rgba(8,14,36,0.55); border: 1px solid var(--border); color: var(--faint); cursor: pointer; user-select: none; transition: all .1s; }
+.pip:hover { border-color: var(--border-strong); color: var(--text); }
+.pip.on { font-weight: 700; border-color: transparent; }
+.pip.on.content { background: var(--green); color: #06231f; }
+.pip.on.teach { background: var(--teal); color: #06231f; }
+
+.gr-item-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.gr-item-note { flex: 1; min-width: 200px; font-size: 13px; padding: 7px 12px; }
+
 /* ------- מחוון מצב רשת (שכבת ביטחון) ------- */
 .net-status { position: fixed; bottom: 0; inset-inline: 0; z-index: 80; text-align: center;
   font-size: 13px; padding: 7px 12px; transition: transform .2s, opacity .2s; }
 .net-status.ok { transform: translateY(100%); opacity: 0; }
 .net-status.pending { background: rgba(35,179,164,0.16); color: #9ff0e4; border-top: 1px solid var(--teal); }
 .net-status.offline { background: rgba(251,92,107,0.18); color: #ffd7dc; border-top: 1px solid var(--danger); font-weight: 600; }
+
+/* ------- בקשות החלפה (מסך מנהל) ------- */
+.swaps-card { border-color: var(--teal) !important; background: rgba(35,179,164,0.06) !important; }
+.swap-row { display: flex; gap: 14px; align-items: center; justify-content: space-between;
+  flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--border); }
+.swap-row:first-of-type { border-top: 0; }
+
+/* ------- מסך המראיין ------- */
+.iv-me { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; }
+.iv-room-tag { background: rgba(69,184,78,0.14); border: 1px solid var(--ok); color: #9ff0b0;
+  border-radius: 999px; padding: 2px 12px; font-size: 13px; font-weight: 700; }
+.iv-round-box { text-align: center; padding: 6px 0; }
+.iv-round-box .big { font-size: 22px; font-weight: 800; color: #fff; }
+.iv-round-box .sub { color: var(--muted); font-size: 14px; margin-top: 4px; }
+.iv-times { display: flex; gap: 14px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+.iv-times > span { min-width: 110px; background: rgba(35,179,164,0.09); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 16px; }
+.iv-times small { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+.iv-times b { font-size: 22px; font-weight: 800; color: #fff; font-family: var(--mono); }
+.iv-slot { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+.iv-slot.running { border-color: var(--teal); background: rgba(35,179,164,0.07); }
+.iv-slot.ended { opacity: 0.65; }
+.iv-slot-head { font-weight: 700; margin-bottom: 8px; }
+.iv-slot-head small { color: var(--muted); font-weight: 400; font-size: 12px; margin-inline-start: 6px; }
+.iv-person-row { display: grid; grid-template-columns: minmax(140px, 1fr) 2fr auto; gap: 12px;
+  align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
+.iv-person-row:first-of-type { border-top: 0; }
+.iv-brief { font-size: 13px; color: var(--muted); line-height: 1.6; }
+.iv-brief.empty { color: var(--faint); font-style: italic; }
+
+/* ------- הקמת יום הערכה (מסך מנהל) ------- */
+.day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 10px 0 4px; }
+
+/* ------- פס מוכנות ------- */
+.readiness { border: 1px solid var(--warn) !important; background: rgba(247,183,49,0.06) !important; }
+.readiness.ok { border-color: var(--ok) !important; background: rgba(69,184,78,0.07) !important; }
+.readiness .rd-head { margin-bottom: 8px; }
+.rd-badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 12px; border-radius: 999px;
+  background: rgba(247,183,49,0.16); color: var(--warn); border: 1px solid var(--warn); }
+.rd-badge.ok { background: rgba(69,184,78,0.16); color: #7ee08a; border-color: var(--ok); }
+.rd-row { display: flex; align-items: flex-start; gap: 9px; font-size: 13.5px; padding: 3px 0; }
+.rd-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; background: var(--faint); }
+.rd-dot.ok { background: var(--ok); }
+.rd-dot.bad { background: var(--danger); }
+.rd-dot.warn { background: var(--warn); }
+
+/* ------- כותרת יום ההערכה בדף הכניסה ------- */
+.day-title { font-size: 15px; font-weight: 700; letter-spacing: .02em; text-align: center;
+  color: var(--teal); margin: 2px 0 14px; }
+
+/* ------- ריאיון: לאן ללכת ואל מי (חדר + מראיין) ------- */
+.iv-where { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin: 20px 0 4px; }
+.iv-where > div { min-width: 150px; background: rgba(35,179,164,0.10); border: 1px solid var(--teal);
+  border-radius: 14px; padding: 14px 22px; text-align: center; }
+.iv-where .lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.iv-where b { font-size: 26px; font-weight: 800; color: #fff; line-height: 1.2; }
+.iv-where .iv-room { background: rgba(69,184,78,0.12); border-color: var(--ok); }
+
+/* ------- מסך בדיקה: שאלה מאושרת (נעולה) ------- */
+.qcard.gr-approved { border: 1px solid rgba(69,184,78,0.5); background: rgba(69,184,78,0.06); }
+.qcard.gr-approved::after { content: "נעול"; position: absolute; top: 10px; inset-inline-start: 12px;
+  font-size: 11px; font-weight: 700; color: #7ee08a; background: rgba(69,184,78,0.14);
+  border: 1px solid rgba(69,184,78,0.4); border-radius: 999px; padding: 2px 9px; }
+.qcard.gr-approved { position: relative; }
+.pip.pip-locked { opacity: 0.5; cursor: default; }

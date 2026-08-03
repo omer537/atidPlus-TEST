@@ -25,6 +25,11 @@
     token: localStorage.getItem('yh_token') || null,
     view: 'login',
     subjectsAvailable: [],
+    dayTitle: 'יום הערכה תשפ״ז',
+    dayPhase: 'open',          // registration = שלב הרשמת הבוקר
+    dayNames: [],              // שמות שהמנהל הזין (להשלמה אוטומטית)
+    subjectCount: 3,           // כמה מקצועות בוחרים ביום הזה (= סבבים − 2)
+    totalRounds: 5,
     reg: { name: '', code: '', declaration: { subjects: [], mathLevel: null, note: '' }, subjects: [], math_level: '5' },
     state: null,
     renderedKey: null,
@@ -130,6 +135,18 @@
       App.subjectsAvailable = (subj && subj.subjects) || [];
     } catch (e) { App.subjectsAvailable = []; }
 
+    // מידע היום: כותרת לדף הכניסה, שלב היום (הרשמה/פתוח), וכמה מקצועות בוחרים
+    try {
+      var di = await API.call('/day-info');
+      App.dayTitle = di.title; App.dayPhase = di.phase;
+      App.subjectCount = di.subject_count || 3; App.totalRounds = di.total_rounds || 5;
+    } catch (e) { App.dayPhase = 'open'; App.subjectCount = 3; App.totalRounds = 5; }
+    // רשימת השמות שהמנהל הזין — להשלמה אוטומטית (מונע כפילויות שמות)
+    try {
+      var dn = await API.call('/day-names');
+      App.dayNames = (dn && dn.names) || [];
+    } catch (e) { App.dayNames = []; }
+
     if (App.token) {
       try {
         App.state = await API.call('/state');
@@ -155,14 +172,21 @@
   function renderLogin() {
     root.innerHTML = '';
     root.className = 'center-screen';
+    var reg = App.dayPhase === 'registration';
+    var dayTitle = App.dayTitle || 'יום הערכה תשפ״ז';
+    var namesList = (App.dayNames && App.dayNames.length)
+      ? '<datalist id="names-list">' + App.dayNames.map(function (n) { return '<option value="' + esc(n) + '"></option>'; }).join('') + '</datalist>' : '';
     var card = el(
       '<div class="card" style="max-width:440px;width:100%">' + BRAND +
-      '<h2>ברוכים הבאים</h2>' +
-      '<p class="lead">הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> משלכם כדי להתחיל. אם כבר התחלתם והתנתקתם — הזינו שוב את אותו שם ואותו קוד, ותחזרו בדיוק לאותה נקודה.</p>' +
+      '<h1 class="day-title">' + esc(dayTitle) + '</h1>' +
+      '<h2>' + (reg ? 'הרשמה לבחינה' : 'ברוכים הבאים') + '</h2>' +
+      '<p class="lead">' + (reg
+        ? 'הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> שתזכרו, ולחצו «הרשמה לבחינה». זו רק הרשמה — המבחן עצמו ייפתח בהמשך, ואז תיכנסו שוב עם אותו שם ואותו קוד.'
+        : 'הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> משלכם כדי להתחיל. אם כבר התחלתם והתנתקתם — הזינו שוב את אותו שם ואותו קוד, ותחזרו בדיוק לאותה נקודה.') + '</p>' +
       '<div id="err"></div>' +
-      '<label class="field"><span>שם מלא</span><input id="name" type="text" autocomplete="off" placeholder="ישראל ישראלי"></label>' +
+      '<label class="field"><span>שם מלא</span><input id="name" type="text" autocomplete="off" list="names-list" placeholder="ישראל ישראלי"></label>' + namesList +
       '<label class="field"><span>קוד אישי (בחירה חופשית)</span><input id="code" type="text" autocomplete="off" placeholder="לדוגמה: 4821"></label>' +
-      '<div class="btn-row"><button class="btn" id="go">כניסה / התחלה</button></div>' +
+      '<div class="btn-row"><button class="btn" id="go">' + (reg ? 'הרשמה לבחינה' : 'כניסה / התחלה') + '</button></div>' +
       '<p class="hint-text">השם הוא המזהה שלכם. הקוד הוא סיסמה שאתם בוחרים עכשיו וזוכרים — הוא משמש לשחזור אם תתנתקו או תצאו לריאיון. אפשר לבחור כל קוד שרוצים.</p>' +
       '</div>'
     );
@@ -191,6 +215,19 @@
     errBox.innerHTML = '';
     if (!name || !code) { errBox.innerHTML = '<div class="msg error">יש למלא שם וקוד.</div>'; return; }
     App.reg.name = name; App.reg.code = code;
+
+    // שלב ההרשמה של הבוקר: שם + קוד בלבד, בלי חשיפה להצהרה/מקצועות.
+    if (App.dayPhase === 'registration') {
+      try {
+        var rm = await API.call('/register-morning', 'POST', { name: name, code: code });
+        App.token = rm.token; localStorage.setItem('yh_token', rm.token);
+        App.state = rm.state; App.view = 'exam'; startLoops(); render();
+      } catch (e2) {
+        errBox.innerHTML = '<div class="msg error">' + esc(e2.message) + '</div>';
+      }
+      return;
+    }
+
     // ניסיון שחזור (אם כבר נרשם)
     try {
       var r = await API.call('/login', 'POST', { name: name, code: code });
@@ -221,10 +258,10 @@
       '<p>מיד אחרי המסך הזה תגיעו לדף הצהרה. תסמנו אילו מקצועות אתם מרגישים שאתם יכולים ללמד (ובמתמטיקה — באיזו רמה). זו <b>הצהרה בלבד</b> — לא מבחן, ולא מחייבת, ו<b>אינה קשורה למקצועות שעליהם תיבחנו בפועל</b> (את אלה תבחרו בשלב נפרד). יש שם גם מקום להערות חופשיות.</p></div>' +
 
       '<div class="info-block"><h3>מבנה המבחן</h3>' +
-      '<p>5 סבבים קצרים: <b>3 מקצועות שתבחרו</b>, פרק <b>«מידע כללי»</b> (זהה לכולם), ו<b>ריאיון אישי</b>. לכל פרק כ־<b>20 דקות</b>. כולם מתחילים ומסיימים כל פרק <b>יחד</b>. ואם קורית תקלה — אל דאגה, <b>הזמן והתשובות שלכם נשמרים</b> ותוכלו להמשיך בדיוק מאותה נקודה.</p></div>' +
+      '<p>' + App.totalRounds + ' סבבים קצרים: <b>' + App.subjectCount + ' ' + (App.subjectCount === 1 ? 'מקצוע שתבחרו' : 'מקצועות שתבחרו') + '</b>, פרק <b>«מידע כללי»</b> (זהה לכולם), ו<b>ריאיון אישי</b>. לכל פרק כ־<b>20 דקות</b>. כולם מתחילים ומסיימים כל פרק <b>יחד</b>. ואם קורית תקלה — אל דאגה, <b>הזמן והתשובות שלכם נשמרים</b> ותוכלו להמשיך בדיוק מאותה נקודה.</p></div>' +
 
       '<div class="info-block"><h3>בחירת המקצועות</h3>' +
-      '<p>לאחר דף ההצהרה תבחרו <b>עד 3 מקצועות</b> שעליהם תיבחנו בפועל (הראשון שתבחרו הוא המקצוע הראשי). אם תבחרו פחות מ-3, <b>המקצוע הראשי יופיע ביותר פרקים</b> כדי להשלים. יחד עם פרק «מידע כללי» — <b>4 פרקים</b> וריאיון בסך הכול.</p></div>' +
+      '<p>לאחר דף ההצהרה תבחרו <b>עד ' + App.subjectCount + ' מקצועות</b> שעליהם תיבחנו בפועל (הראשון שתבחרו הוא המקצוע הראשי). אם תבחרו פחות, <b>המקצוע הראשי יופיע ביותר פרקים</b> כדי להשלים. יחד עם פרק «מידע כללי» — <b>' + (App.subjectCount + 1) + ' פרקים</b> וריאיון בסך הכול.</p></div>' +
 
       '<div class="info-block"><h3>פרק «מידע כללי»</h3>' +
       '<p>בפרק הזה תקבלו <b>חומר חדש ופשוט שכולו מוסבר בתוך הקטע</b> — לא צריך שום ידע קודם. המשימה: להבין אותו, ואז להסביר אותו לתלמיד. זה בדיוק מה שאנחנו הכי רוצים לראות — את היכולת שלכם להנגיש.</p></div>' +
@@ -334,7 +371,7 @@
       '<div class="card">' + BRAND +
       '<div class="step-dots"><i></i><i></i><i class="active"></i></div>' +
       '<h2>בחירת נושאים</h2>' +
-      '<p class="lead">בחרו עד 3 מקצועות (הראשון שתבחרו הוא הנושא הראשי). בנוסף, פרק «מידע כללי» יינתן לכולם — כך שבסך הכול תעברו 4 פרקים וריאיון.</p>' +
+      '<p class="lead">בחרו עד ' + App.subjectCount + ' מקצועות (הראשון שתבחרו הוא הנושא הראשי). בנוסף, פרק «מידע כללי» יינתן לכולם — כך שבסך הכול תעברו ' + (App.subjectCount + 1) + ' פרקים וריאיון.</p>' +
       '<div id="err"></div>' +
       '<div class="chips">' + chips + '</div>' + mathBox +
       '<div class="btn-row" style="margin-top:24px"><button class="btn" id="start">התחל מבחן</button>' +
@@ -346,7 +383,7 @@
         var s = c.getAttribute('data-subj');
         var idx = App.reg.subjects.indexOf(s);
         if (idx >= 0) App.reg.subjects.splice(idx, 1);
-        else { if (App.reg.subjects.length >= 3) return; App.reg.subjects.push(s); }
+        else { if (App.reg.subjects.length >= App.subjectCount) return; App.reg.subjects.push(s); }
         renderSubjects();
       };
     });
@@ -457,17 +494,32 @@
       submitted: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
       ended: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
       finished: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
+      registered_waiting: '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>',
     };
-    var titles = { interview: 'סבב הריאיון שלך', waiting: 'ממתינים לסבב הבא', submitted: 'הפרק הוגש', ended: 'המבחן הסתיים', finished: 'סיימת — כל הכבוד!' };
+    var titles = {
+      interview: 'סבב הריאיון שלך', waiting: 'ממתינים לסבב הבא', submitted: 'הפרק הוגש',
+      ended: 'המבחן הסתיים', finished: 'סיימת — כל הכבוד!', registered_waiting: 'נרשמת בהצלחה',
+    };
     var footer = (kind === 'waiting' || kind === 'submitted')
-      ? '<p style="margin-top:18px;color:var(--faint);font-size:14px">המסך יתעדכן אוטומטית כשהבוחן ישחרר את הסבב הבא.</p>' : '';
+      ? '<p style="margin-top:18px;color:var(--faint);font-size:14px">המסך יתעדכן אוטומטית כשהבוחן ישחרר את הסבב הבא.</p>'
+      : (kind === 'registered_waiting'
+        ? '<p style="margin-top:18px;color:var(--faint);font-size:14px">אפשר לסגור את החלון. כשהמבחן ייפתח — היכנסו שוב עם אותו שם ואותו קוד.</p>' : '');
+    // בריאיון: להציג בהבלטה לאן ללכת ואל מי (מתעדכן לבד אם המנהל משנה)
+    var whereHtml = '';
+    if (kind === 'interview' && App.state && App.state.slot && (App.state.slot.room || App.state.slot.interviewer)) {
+      var sl = App.state.slot;
+      whereHtml = '<div class="iv-where">' +
+        (sl.room ? '<div class="iv-room"><span class="lbl">חדר</span><b>' + esc(sl.room) + '</b></div>' : '') +
+        (sl.interviewer ? '<div class="iv-person"><span class="lbl">מראיין/ת</span><b>' + esc(sl.interviewer) + '</b></div>' : '') +
+        '</div>';
+    }
     root.innerHTML = '';
     root.appendChild(el(
       '<div>' + topBar() +
       '<div class="card"><div class="big-state">' +
       '<div class="glyph">' + (icons[kind] || icons.waiting) + '</div>' +
       '<h2>' + (titles[kind] || 'ממתינים') + '</h2>' +
-      '<p>' + esc(message || '') + '</p>' + footer +
+      '<p>' + esc(message || '') + '</p>' + whereHtml + footer +
       '</div></div></div>'
     ));
     wireLogout();

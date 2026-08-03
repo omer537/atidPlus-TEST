@@ -67,8 +67,17 @@ window.AdminApp = (function () {
       '<button class="btn small" id="btn-roster" title="שמות, קודים אישיים וסבב ריאיון — לגיבוי אצלך">רשימת נבחנים וקודים</button>' +
       '<button class="btn small" id="btn-excel" title="כל התשובות כאקסל">הורד תשובות (Excel)</button>' +
       '<button class="btn ghost small" id="btn-export" title="גיבוי JSON לבדיקת AI">JSON</button>' +
+      '<button class="btn small" id="btn-grade" title="בדיקה, ציונים ודירוג (אחרי יום המבחן)">מסך בדיקה</button>' +
       '<button class="btn ghost small" id="btn-logout">יציאה</button></div>' +
       '<div id="ended-banner"></div>' +
+      // הקמת יום הערכה: בחירת יום, כותרת, מספר סבבים, שלב היום
+      '<div class="card"><div id="day-setup"></div></div>' +
+      // בקשות החלפה מהמראיינים
+      '<div id="swaps"></div>' +
+      // פס מוכנות — תנאי בסיס ושיבוץ ריאיונות
+      '<div id="readiness"></div>' +
+      // מראיינים וחדרים
+      '<div class="card"><div id="interviewers"></div></div>' +
       // קונסולת הסבב
       '<div class="card"><div id="console"></div></div>' +
       // לוח תכנון — מי בריאיון בכל אחד מ-5 הסבבים
@@ -92,7 +101,7 @@ window.AdminApp = (function () {
       '<span class="spacer"></span><span id="summary" class="health-list"></span></div>' +
       '<p class="hint-text" id="roster-hint"></p>' +
       '<div style="overflow-x:auto"><table class="grid" id="tbl"><thead><tr>' +
-      '<th>שם</th><th>לריאיון?</th><th>סטטוס</th><th>עכשיו</th><th>זמן</th><th>התראות</th><th>פעולות</th>' +
+      '<th>שם</th><th>לריאיון?</th><th>מראיין/חדר</th><th>סטטוס</th><th>עכשיו</th><th>זמן</th><th>התראות</th><th>פעולות</th>' +
       '</tr></thead><tbody id="tbody"></tbody></table></div></div>' +
       // ניהול נבחנים
       '<div class="card"><h2 class="section-title">ניהול נבחנים</h2>' +
@@ -131,6 +140,7 @@ window.AdminApp = (function () {
     document.getElementById('btn-roster').onclick = downloadRoster;
     document.getElementById('btn-excel').onclick = downloadExcel;
     document.getElementById('btn-export').onclick = downloadExport;
+    document.getElementById('btn-grade').onclick = function () { location.href = '/grade'; };
     document.getElementById('btn-health').onclick = toggleHealth;
     document.getElementById('btn-backup-now').onclick = backupNow;
     document.getElementById('add-one').onclick = addOne;
@@ -143,6 +153,230 @@ window.AdminApp = (function () {
     var mt = document.getElementById('btn-matrix-toggle');
     if (mt) mt.onclick = function () { matrixHidden = !matrixHidden; this.textContent = matrixHidden ? 'הצג' : 'הסתר'; refresh(); };
     renderAddSubjects();
+  }
+
+  // ------------------------------------------------- הקמת יום הערכה
+  var DAYS = { days: [], active_day_id: null, min_rounds: 3, max_rounds: 5 };
+  async function loadDays() {
+    try { DAYS = await call('/examiner/days'); } catch (e) { /* לא לשבור */ }
+    renderDaySetup();
+  }
+  function renderDaySetup() {
+    var box = document.getElementById('day-setup'); if (!box) return;
+    // הגנה: אם המנהל מקליד/בוחר כרגע בתוך הכרטיס — לא לרנדר מחדש (שלא יימחק לו)
+    if (box.contains(document.activeElement) &&
+        /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    var S = STATE || {};
+    var day = S.day || null;
+    var phase = day ? day.phase : 'registration';
+    var n = day ? day.total_rounds : 5;
+    var subjCount = S.subject_count || Math.max(1, n - 2);
+    var opts = '';
+    for (var k = DAYS.min_rounds; k <= DAYS.max_rounds; k++) {
+      opts += '<option value="' + k + '"' + (k === n ? ' selected' : '') + '>' + k + ' סבבים</option>';
+    }
+    var dayOpts = DAYS.days.map(function (d) {
+      return '<option value="' + d.id + '"' + (d.id === DAYS.active_day_id ? ' selected' : '') + '>' +
+        esc(d.name) + ' (' + d.examinees + ' נבחנים)</option>';
+    }).join('');
+    var phases = [['registration', 'הרשמה בלבד'], ['open', 'המבחן פתוח'], ['running', 'באמצע היום']];
+    var phaseBtns = phases.map(function (p) {
+      return '<button class="btn ' + (p[0] === phase ? '' : 'ghost') + ' small ph-btn" data-ph="' + p[0] + '">' + p[1] + '</button>';
+    }).join('');
+
+    box.innerHTML =
+      '<div class="toolbar"><h2 class="section-title">הקם יום הערכה</h2><span class="spacer"></span>' +
+      '<button class="btn small" id="btn-new-day">+ יום הערכה חדש</button></div>' +
+      '<p class="hint-text">כל יום הערכה נשמר בנפרד — נתוני ימים קודמים לא נמחקים ולא מתערבבים. אפשר לשנות הכול תוך כדי.</p>' +
+      '<div class="day-grid">' +
+      '<label class="field" style="margin:0"><span>יום פעיל</span><select id="day-pick">' + dayOpts + '</select></label>' +
+      '<label class="field" style="margin:0"><span>שם היום (לשימוש שלך)</span><input id="day-name" type="text" value="' + esc(day ? day.name : '') + '"></label>' +
+      '<label class="field" style="margin:0"><span>כותרת לנבחן (בדף הכניסה)</span><input id="day-title" type="text" value="' + esc(day ? (day.title || '') : '') + '"></label>' +
+      '<label class="field" style="margin:0"><span>מספר סבבים</span><select id="day-rounds">' + opts + '</select></label>' +
+      '</div>' +
+      '<p class="hint-text" id="rounds-explain">' + n + ' סבבים = <b>' + subjCount + ' ' + (subjCount === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. מינימום ' + DAYS.min_rounds + ' סבבים.</p>' +
+      '<div class="toolbar" style="margin-top:6px"><b style="font-size:14px">שלב היום:</b> ' + phaseBtns +
+      '<span class="spacer"></span><button class="btn small" id="btn-save-day">שמור שינויים</button></div>' +
+      '<p class="hint-text"><b>הרשמה בלבד</b> = הנבחנים נרשמים בבוקר ורואים רק «נרשמת בהצלחה» (בלי הצהרה ובלי מקצועות), ואת/ה ממיין/ת בינתיים. <b>המבחן פתוח</b> = הם ממשיכים להוראות, הצהרה ובחירת מקצועות.</p>' +
+      '<div id="day-msg"></div>';
+
+    document.getElementById('btn-new-day').onclick = createDay;
+    document.getElementById('btn-save-day').onclick = saveDay;
+    document.getElementById('day-pick').onchange = function () { switchDay(Number(this.value)); };
+    document.getElementById('day-rounds').onchange = function () {
+      var v = Number(this.value), sc = Math.max(1, v - 2);
+      document.getElementById('rounds-explain').innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. מינימום ' + DAYS.min_rounds + ' סבבים. <span style="color:var(--warn)">לחצו «שמור שינויים».</span>';
+    };
+    box.querySelectorAll('.ph-btn').forEach(function (b) {
+      b.onclick = function () { saveDay({ phase: b.getAttribute('data-ph') }); };
+    });
+  }
+  async function createDay() {
+    var name = prompt('שם ליום ההערכה החדש (לשימוש שלך):', 'יום הערכה ' + new Date().toLocaleDateString('he-IL'));
+    if (name === null) return;
+    var rounds = prompt('כמה סבבים ביום הזה? (3–5)', '5');
+    if (rounds === null) return;
+    if (!confirm('ליצור יום הערכה חדש?\n\nהיום החדש יהיה ריק ויהפוך לפעיל. הנתונים של הימים הקודמים נשמרים במלואם ולא נמחקים.')) return;
+    try {
+      await call('/examiner/create-day', 'POST', { name: name, total_rounds: Number(rounds) || 5 });
+      await loadDays(); refresh();
+    } catch (e) { alert(e.message); }
+  }
+  async function switchDay(id) {
+    try { await call('/examiner/set-active-day', 'POST', { day_id: id }); await loadDays(); refresh(); loadInterviewers(); }
+    catch (e) { alert(e.message); }
+  }
+  async function saveDay(extra) {
+    var body = extra || {};
+    if (!extra) {
+      body.name = document.getElementById('day-name').value;
+      body.title = document.getElementById('day-title').value;
+      body.total_rounds = Number(document.getElementById('day-rounds').value);
+    }
+    var msg = document.getElementById('day-msg');
+    try {
+      await call('/examiner/update-day', 'POST', body);
+      if (msg) msg.innerHTML = '<div class="msg info">נשמר.</div>';
+      await loadDays(); refresh();
+    } catch (e) {
+      if (msg) msg.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; else alert(e.message);
+      await loadDays();
+    }
+  }
+
+  // ------------------------------------------------- בקשות החלפה מהמראיינים
+  async function renderSwaps(S) {
+    var box = document.getElementById('swaps'); if (!box) return;
+    if (!S || !S.pending_swaps) { box.innerHTML = ''; return; }
+    var reqs;
+    try { reqs = (await call('/examiner/swap-requests')).requests || []; } catch (e) { return; }
+    var pending = reqs.filter(function (r) { return r.status === 'pending'; });
+    if (!pending.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="card swaps-card">' +
+      '<div class="toolbar"><h2 class="section-title">בקשות החלפה מהמראיינים <span class="rd-badge">' + pending.length + ' ממתינות</span></h2></div>' +
+      '<p class="hint-text">המראיין מבקש — אתם מאשרים. אישור מבצע את השינוי בפועל (אם ציינתם סבב/מראיין חדשים).</p>' +
+      pending.map(function (r) {
+        var rounds = '';
+        for (var n = 1; n <= S.total_rounds; n++) rounds += '<option value="' + n + '"' + (n === r.round ? ' selected' : '') + '>סבב ' + n + '</option>';
+        var ivs = '<option value="">— בלי שינוי מראיין —</option>' + (S.interviewers || []).map(function (v) {
+          return '<option value="' + v.id + '">' + esc(v.name) + (v.room ? ' · ' + esc(v.room) : '') + '</option>';
+        }).join('');
+        return '<div class="swap-row">' +
+          '<div><b>' + esc(r.interviewer_name || '—') + '</b>' + (r.room ? ' <small style="color:var(--muted)">' + esc(r.room) + '</small>' : '') +
+          '<div style="font-size:13px;color:var(--muted);margin-top:3px">' + esc(r.requested_change) + '</div></div>' +
+          '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+          '<select class="sw-round" data-id="' + r.id + '">' + rounds + '</select>' +
+          '<select class="sw-iv" data-id="' + r.id + '">' + ivs + '</select>' +
+          '<button class="btn small sw-ok" data-id="' + r.id + '">אשר</button>' +
+          '<button class="btn ghost small sw-no" data-id="' + r.id + '">דחה</button>' +
+          '</div></div>';
+      }).join('') + '</div>';
+    box.querySelectorAll('.sw-ok').forEach(function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-id');
+        var rd = box.querySelector('.sw-round[data-id="' + id + '"]').value;
+        var iv = box.querySelector('.sw-iv[data-id="' + id + '"]').value;
+        var body = { id: Number(id), approve: true, new_round: Number(rd) };
+        if (iv) body.new_interviewer_id = Number(iv);
+        call('/examiner/decide-swap', 'POST', body).then(function () { refresh(); loadInterviewers(); }).catch(function (e) { alert(e.message); });
+      };
+    });
+    box.querySelectorAll('.sw-no').forEach(function (b) {
+      b.onclick = function () {
+        call('/examiner/decide-swap', 'POST', { id: Number(b.getAttribute('data-id')), approve: false })
+          .then(function () { refresh(); }).catch(function (e) { alert(e.message); });
+      };
+    });
+  }
+
+  // ------------------------------------------------- פס מוכנות
+  function renderReadiness(S) {
+    var box = document.getElementById('readiness'); if (!box) return;
+    var R = S && S.readiness; if (!R) { box.innerHTML = ''; return; }
+    var items = [];
+    var okAll = R.all_have_interview && R.all_have_interviewer && R.rounds_ok && !R.interviewers_without_room.length;
+    items.push({ ok: R.rounds_ok, txt: 'מספר סבבים תקין (' + S.total_rounds + ')' });
+    items.push({
+      ok: R.all_have_interview,
+      txt: 'שובצו לריאיון: ' + R.interview_assigned + ' מתוך ' + R.total,
+      more: R.missing_interview.length ? 'חסרים: ' + R.missing_interview.slice(0, 8).join(', ') + (R.missing_interview.length > 8 ? ' ועוד…' : '') : '',
+    });
+    items.push({
+      ok: R.all_have_interviewer,
+      txt: 'שובץ מראיין: ' + R.interviewer_assigned + ' מתוך ' + R.total,
+      more: R.missing_interviewer.length ? 'בלי מראיין: ' + R.missing_interviewer.slice(0, 8).join(', ') + (R.missing_interviewer.length > 8 ? ' ועוד…' : '') : '',
+    });
+    if (R.interviewers_without_room.length) items.push({ ok: false, txt: 'מראיינים בלי חדר: ' + R.interviewers_without_room.join(', ') });
+    if (R.self_registered.length) items.push({ ok: false, warn: true, txt: 'נרשמו בשם שאינו ברשימה (לבדוק): ' + R.self_registered.join(', ') });
+    box.innerHTML = '<div class="card readiness ' + (okAll ? 'ok' : '') + '">' +
+      '<div class="rd-head">' + (okAll ? '<span class="rd-badge ok">הכול מוכן ✓</span>' : '<span class="rd-badge">בדיקת מוכנות</span>') + '</div>' +
+      items.map(function (it) {
+        return '<div class="rd-row"><span class="rd-dot ' + (it.ok ? 'ok' : (it.warn ? 'warn' : 'bad')) + '"></span>' +
+          '<span>' + esc(it.txt) + (it.more ? ' <small style="color:var(--muted)">· ' + esc(it.more) + '</small>' : '') + '</span></div>';
+      }).join('') + '</div>';
+  }
+
+  // ------------------------------------------------- מראיינים וחדרים
+  var IVS = [];
+  async function loadInterviewers() {
+    try { IVS = (await call('/examiner/interviewers')).interviewers || []; } catch (e) { IVS = []; }
+    renderInterviewers();
+  }
+  function renderInterviewers() {
+    var box = document.getElementById('interviewers'); if (!box) return;
+    var rows = IVS.map(function (v) {
+      return '<tr><td><input class="iv-name" data-id="' + v.id + '" value="' + esc(v.name) + '"></td>' +
+        '<td><input class="iv-room" data-id="' + v.id + '" value="' + esc(v.room) + '" placeholder="למשל: חדר 101"></td>' +
+        '<td style="text-align:center">' + v.load + '</td>' +
+        '<td><button class="btn ghost small iv-save" data-id="' + v.id + '">שמור</button> ' +
+        '<button class="btn ghost small iv-del" data-id="' + v.id + '">✕</button></td></tr>';
+    }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--faint);padding:18px">אין מראיינים. הוסיפו למטה — כל מראיין יושב בחדר קבוע.</td></tr>';
+    box.innerHTML =
+      '<div class="toolbar"><h2 class="section-title">מראיינים וחדרים</h2><span class="spacer"></span>' +
+      '<span class="hint-text" style="margin:0">מראיין = חדר קבוע. הנבחן רואה את השם והחדר בזמן הריאיון.</span></div>' +
+      '<table class="grid"><thead><tr><th>שם המראיין/ת</th><th>חדר</th><th>ריאיונות</th><th>פעולות</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px">' +
+      '<div style="flex:1;min-width:240px"><b>הוספת מראיין</b>' +
+      '<label class="field" style="margin-top:8px"><span>שם</span><input id="iv-add-name" type="text"></label>' +
+      '<label class="field"><span>חדר</span><input id="iv-add-room" type="text" placeholder="למשל: חדר 101"></label>' +
+      '<button class="btn small" id="iv-add">הוסף מראיין</button></div>' +
+      '<div style="flex:1;min-width:240px"><b>הוספת רשימה</b>' +
+      '<p class="hint-text">שורה לכל מראיין: <span style="font-family:var(--mono)">שם, חדר</span></p>' +
+      '<textarea id="iv-bulk" placeholder="רות מזרחי, חדר 101&#10;אבי דגן, חדר 102" style="min-height:90px"></textarea>' +
+      '<button class="btn small" id="iv-bulk-add" style="margin-top:8px">הוסף רשימה</button></div>' +
+      '</div><div id="iv-msg" style="margin-top:10px"></div>';
+
+    document.getElementById('iv-add').onclick = async function () {
+      var name = document.getElementById('iv-add-name').value.trim();
+      var room = document.getElementById('iv-add-room').value.trim();
+      if (!name) return;
+      try { await call('/examiner/add-interviewer', 'POST', { name: name, room: room }); loadInterviewers(); refresh(); }
+      catch (e) { document.getElementById('iv-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+    };
+    document.getElementById('iv-bulk-add').onclick = async function () {
+      var text = document.getElementById('iv-bulk').value;
+      if (!text.trim()) return;
+      try { var r = await call('/examiner/add-interviewers-bulk', 'POST', { text: text });
+        document.getElementById('iv-msg').innerHTML = '<div class="msg info">נוספו ' + r.added + '.</div>';
+        document.getElementById('iv-bulk').value = ''; loadInterviewers(); refresh();
+      } catch (e) { document.getElementById('iv-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+    };
+    box.querySelectorAll('.iv-save').forEach(function (b) {
+      b.onclick = async function () {
+        var id = b.getAttribute('data-id');
+        var name = box.querySelector('.iv-name[data-id="' + id + '"]').value;
+        var room = box.querySelector('.iv-room[data-id="' + id + '"]').value;
+        try { await call('/examiner/edit-interviewer', 'POST', { id: Number(id), name: name, room: room }); loadInterviewers(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+    box.querySelectorAll('.iv-del').forEach(function (b) {
+      b.onclick = async function () {
+        if (!confirm('להסיר את המראיין/ת?')) return;
+        try { await call('/examiner/remove-interviewer', 'POST', { id: Number(b.getAttribute('data-id')) }); loadInterviewers(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
   }
 
   async function autosplit() {
@@ -289,11 +523,13 @@ window.AdminApp = (function () {
 
   function renderRoster(S) {
     var tb = document.getElementById('tbody'); if (!tb) return;
+    // הגנה: אם פתוח כרגע בורר מראיין — לא לרנדר מחדש (שלא ייסגר באמצע הבחירה)
+    if (tb.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
     var states = {}; S.rounds.forEach(function (r) { states[r.round] = r.state; });
     var hint = document.getElementById('roster-hint');
     if (hint) hint.innerHTML = S.running
       ? 'סבב <b>' + S.running + '</b> פועל. סבב שכבר התחיל/הסתיים נעול לסימון. לחצו "כרטיס" לטיפול פרטני בנבחן.'
-      : 'קבעו לכל נבחן באיזה סבב הריאיון שלו (כפתורים 1–5). לחצו "כרטיס" לפרטים ולפעולות פרטניות.';
+      : 'קבעו לכל נבחן באיזה סבב הריאיון שלו (כפתורים 1–' + S.total_rounds + ') ואת המראיין/החדר. לחצו "כרטיס" לפרטים ולפעולות פרטניות.';
 
     var rows = S.examinees.slice().sort(function (a, b) { return (attnOf(S, b) ? 1 : 0) - (attnOf(S, a) ? 1 : 0); });
 
@@ -329,8 +565,25 @@ window.AdminApp = (function () {
       var cardBtn = '<button class="btn ghost small open-card" data-c="' + esc(e.code) + '">כרטיס</button>';
       var cls = (attnOf(S, e) ? 'attn' : '') + (e.left ? ' left-row' : '');
 
-      return '<tr class="' + cls.trim() + '"><td>' + esc(e.name) + '</td><td>' + ivCell + '</td><td>' + status + '</td><td>' + now + '</td><td>' + timeCell + '</td><td>' + flags + '</td><td>' + cardBtn + '</td></tr>';
-    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--faint);padding:30px">אין נבחנים עדיין. הוסיפו בחלק "ניהול נבחנים".</td></tr>';
+      // בורר מראיין (=חדר) לסבב הריאיון המשובץ
+      var ivPick;
+      if (e.interviewed) {
+        var was = (e.interview_assign || []).filter(function (a) { return a.interviewer; })[0];
+        ivPick = was ? '<span style="font-size:12px;color:var(--muted)">' + esc(was.interviewer) + (was.room ? ' · ' + esc(was.room) : '') + '</span>' : '<span style="color:var(--faint)">—</span>';
+      } else if (!(e.marked_rounds || []).length) {
+        ivPick = '<span style="color:var(--faint);font-size:12px">קבעו סבב קודם</span>';
+      } else {
+        var rnd = e.marked_rounds[0];
+        var cur = (e.interview_assign || []).filter(function (a) { return a.round === rnd; })[0];
+        var curId = cur && cur.interviewer_id ? cur.interviewer_id : '';
+        var o = '<option value="">— בחרו מראיין —</option>' + (S.interviewers || []).map(function (v) {
+          return '<option value="' + v.id + '"' + (String(v.id) === String(curId) ? ' selected' : '') + '>' + esc(v.name) + (v.room ? ' · ' + esc(v.room) : '') + '</option>';
+        }).join('');
+        ivPick = '<select class="iv-pick" data-c="' + esc(e.code) + '" data-r="' + rnd + '" style="min-width:150px;font-size:12px">' + o + '</select>' +
+          (curId ? '' : ' <span style="color:var(--warn)" title="חסר מראיין">⚑</span>');
+      }
+      return '<tr class="' + cls.trim() + '"><td>' + esc(e.name) + (e.self_registered ? ' <span title="נרשם בשם שאינו ברשימה" style="color:var(--warn)">⚑</span>' : '') + '</td><td>' + ivCell + '</td><td>' + ivPick + '</td><td>' + status + '</td><td>' + now + '</td><td>' + timeCell + '</td><td>' + flags + '</td><td>' + cardBtn + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--faint);padding:30px">אין נבחנים עדיין. הוסיפו בחלק "ניהול נבחנים".</td></tr>';
 
     var iv = S.examinees.filter(function (e) { return e.interviewed; }).length;
     var need = S.examinees.filter(function (e) { return e.needs_interview; }).length;
@@ -344,6 +597,14 @@ window.AdminApp = (function () {
           .then(function (r) { if (r && r.warn) alert(r.warn); refresh(); }).catch(function (e) { alert(e.message); refresh(); });
       };
     });
+    tb.querySelectorAll('.iv-pick').forEach(function (sel) {
+      sel.onchange = function () {
+        call('/examiner/assign-interviewer', 'POST', {
+          code: sel.getAttribute('data-c'), round: Number(sel.getAttribute('data-r')),
+          interviewer_id: sel.value ? Number(sel.value) : null,
+        }).then(function () { refresh(); loadInterviewers(); }).catch(function (e) { alert(e.message); refresh(); });
+      };
+    });
     tb.querySelectorAll('.open-card').forEach(function (b) { b.onclick = function () { openCard(b.getAttribute('data-c')); }; });
   }
 
@@ -353,6 +614,10 @@ window.AdminApp = (function () {
   function renderCard(code) {
     var e = STATE && STATE.examinees.find(function (x) { return x.code === code; });
     if (!e) { closeCard(); return; }
+    // הגנה: אם מקלידים כרגע בתוך הכרטיס (בריף/עריכת שם) — לא לרנדר מחדש
+    var openM = document.getElementById('card-modal');
+    if (openM && openM.contains(document.activeElement) &&
+        /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     var m = document.getElementById('card-modal');
     if (!m) { m = el('<div class="modal-back" id="card-modal"></div>'); document.body.appendChild(m); m.onclick = function (ev) { if (ev.target === m) closeCard(); }; }
     var tl = '';
@@ -371,6 +636,28 @@ window.AdminApp = (function () {
       '<button class="btn ghost" data-x="reopen">פתח הגשה מחדש</button>' +
       (e.left ? '<button class="btn ghost" data-x="unleft">החזר לפעילות</button>' : '<button class="btn ghost" data-x="left">סמן: עזב</button>') +
       '<button class="btn danger" data-x="remove">הסר נבחן</button>';
+
+    // תיקון הפרק הנוכחי בלייב — הזמן שנשאר נשמר
+    var fixHtml = '';
+    if (e.current && e.current.kind === 'chapter' && e.current.status !== 'done') {
+      var subjOpts = '<option value="">— החלף מקצוע ל… —</option>' + availableSubjects.map(function (sb) {
+        return '<option value="' + esc(sb) + '"' + (sb === e.current.subject ? ' disabled' : '') + '>' + esc(sb) + '</option>';
+      }).join('');
+      fixHtml =
+        '<div style="font-size:13px;color:var(--muted);margin-top:14px">תיקון הפרק הנוכחי (' + esc(e.current.subject || '') +
+        (e.current.level ? ' · ' + esc(e.current.level) + ' יח״ל' : '') + ') — <b style="color:var(--ok)">הזמן שנשאר נשמר</b></div>' +
+        '<div class="mc-actions">' +
+        (e.current.subject === 'מתמטיקה' ? '<button class="btn ghost" data-fx="lower_level">הורד רמה (5→4→3)</button>' : '') +
+        '<button class="btn ghost" data-fx="swap_variant">החלף שאלה (נושא אחר באותו מקצוע)</button>' +
+        '<select id="fx-subject" style="min-width:190px">' + subjOpts + '</select>' +
+        '</div><div id="fx-msg"></div>';
+    }
+    // בריף קצר על הנבחן — מה שהמראיין שלו יראה
+    var briefHtml =
+      '<div style="font-size:13px;color:var(--muted);margin-top:14px">בריף למראיין (מה שהמראיין/ת של הנבחן יראה)</div>' +
+      '<div style="display:flex;gap:8px;align-items:flex-end">' +
+      '<label class="field" style="margin:0;flex:1"><textarea id="card-brief" style="min-height:56px" placeholder="למשל: מועמדת חזקה במתמטיקה, כדאי לבדוק ניסיון בהוראה.">' + esc(e.interview_brief || '') + '</textarea></label>' +
+      '<button class="btn small" data-x="save_brief">שמור בריף</button></div>';
 
     var ivText = (e.marked_rounds && e.marked_rounds.length) ? ('סבב ' + e.marked_rounds.join(', ')) : (e.interviewed ? 'התראיין ✓' : 'טרם נקבע');
     var editing = window.__cardEditing === code;
@@ -404,12 +691,30 @@ window.AdminApp = (function () {
       meta + declHtml +
       '<div style="font-size:13px;color:var(--muted);margin-top:12px">מסלול</div><div class="timeline">' + (tl || '<span style="color:var(--faint)">—</span>') + '</div>' +
       '<div style="font-size:13px;color:var(--muted);margin-top:12px">טיפול פרטני (לא משפיע על שאר הכיתה)</div>' +
-      '<div class="mc-actions">' + actions + '</div></div>';
+      '<div class="mc-actions">' + actions + '</div>' + fixHtml + briefHtml + '</div>';
     document.getElementById('card-close').onclick = closeCard;
-    m.querySelectorAll('.mc-actions button, .mc-edit button, [data-x="edit"]').forEach(function (b) { b.onclick = function () { cardAction(code, b.getAttribute('data-x')); }; });
+    m.querySelectorAll('.mc-actions button, .mc-edit button, [data-x="edit"], [data-x="save_brief"]').forEach(function (b) { b.onclick = function () { cardAction(code, b.getAttribute('data-x')); }; });
+    m.querySelectorAll('[data-fx]').forEach(function (b) { b.onclick = function () { fixSlot(code, b.getAttribute('data-fx')); }; });
+    var fxs = document.getElementById('fx-subject');
+    if (fxs) fxs.onchange = function () { if (fxs.value) fixSlot(code, 'change_subject', fxs.value); };
+  }
+  async function fixSlot(code, action, subject) {
+    var box = document.getElementById('fx-msg');
+    try {
+      var r = await call('/examiner/fix-slot', 'POST', { code: code, action: action, subject: subject });
+      if (box) box.innerHTML = '<div class="msg info">הפרק הוחלף ל: ' + esc(r.subject) + (r.level ? ' · ' + esc(r.level) + ' יח״ל' : '') + '. הזמן שנשאר נשמר.</div>';
+      refresh();
+    } catch (e) {
+      if (box) box.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; else alert(e.message);
+    }
   }
   async function cardAction(code, x) {
     try {
+      if (x === 'save_brief') {
+        var bt = document.getElementById('card-brief');
+        await call('/examiner/set-examinee-brief', 'POST', { code: code, brief: bt ? bt.value : '' });
+        refresh(); return;
+      }
       if (x === 'edit') { window.__cardEditing = code; renderCard(code); return; }
       else if (x === 'cancel_edit') { window.__cardEditing = null; renderCard(code); return; }
       else if (x === 'save_edit') {
@@ -573,6 +878,7 @@ window.AdminApp = (function () {
     var M = null;
     if (!matrixHidden) { try { M = await call('/examiner/matrix'); } catch (e) { /* אל תשבור את הרענון */ } }
     try {
+      renderDaySetup(); renderReadiness(STATE); renderSwaps(STATE);
       renderConsole(STATE); renderPlanBoard(STATE); renderMatrix(M); renderRoster(STATE); renderExamState();
       if (window.__openCardCode) renderCard(window.__openCardCode);
     } catch (e) { /* לא לשבור את הלולאה בגלל שגיאת רינדור */ }
@@ -580,6 +886,8 @@ window.AdminApp = (function () {
   async function start() {
     try { availableSubjects = (await call('/subjects')).subjects || []; } catch (e) { availableSubjects = []; }
     renderShell();
+    await loadDays();
+    loadInterviewers();
     refresh(); loadBackups();
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = setInterval(refresh, 3000);

@@ -96,15 +96,17 @@ function poolFor(subject, mathLevel) {
 // מחזיר מערך של {subject, level, chapter_id}: עד NUM_CHOSEN פרקי-מקצוע + «מידע כללי».
 // אם נבחרו פחות מ-NUM_CHOSEN, ממלאים סבב-סבב על המקצועות הנבחרים (כל פעם וריאנט חדש)
 // עד שמגיעים ל-NUM_CHOSEN או שנגמרו הווריאנטים. הפרק הכללי תמיד אחרון (חובה לכולם).
-function chapterListFor(subjects, mathLevel) {
-  const chosen = (subjects || []).filter((s) => s && s !== GENERAL_SUBJECT).slice(0, NUM_CHOSEN);
+function chapterListFor(subjects, mathLevel, numChosen) {
+  // כמה פרקי-מקצוע ליום הזה. ברירת מחדל NUM_CHOSEN (=3, יום של 5 סבבים).
+  const want = Math.max(1, Number(numChosen) || NUM_CHOSEN);
+  const chosen = (subjects || []).filter((s) => s && s !== GENERAL_SUBJECT).slice(0, want);
   const taken = {};
   const out = [];
   let progressed = true;
-  while (out.length < NUM_CHOSEN && progressed) {
+  while (out.length < want && progressed) {
     progressed = false;
     for (const subject of chosen) {
-      if (out.length >= NUM_CHOSEN) break;
+      if (out.length >= want) break;
       const level = subject === 'מתמטיקה' ? (mathLevel || '5') : null;
       const pool = poolFor(subject, mathLevel);
       const k = taken[subject] || 0;
@@ -120,9 +122,9 @@ function chapterListFor(subjects, mathLevel) {
   return out;
 }
 
-// כמה פרקי-מקצוע (בלי «מידע כללי») אפשר להרכיב מהבחירה — לאימות "אפשר 3 פרקים".
-function chosenChapterCount(subjects, mathLevel) {
-  return chapterListFor(subjects, mathLevel).filter((c) => c.subject !== GENERAL_SUBJECT).length;
+// כמה פרקי-מקצוע (בלי «מידע כללי») אפשר להרכיב מהבחירה — לאימות מול מספר הפרקים הנדרש.
+function chosenChapterCount(subjects, mathLevel, numChosen) {
+  return chapterListFor(subjects, mathLevel, numChosen).filter((c) => c.subject !== GENERAL_SUBJECT).length;
 }
 
 // הפרק הבא שטרם נעשה (מתוך הרשימה), בהינתן קבוצת מזהי הפרקים שכבר הוגשו.

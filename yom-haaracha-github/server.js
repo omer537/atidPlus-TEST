@@ -10,9 +10,11 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const XLSX = require('xlsx');
-const { db, DB_PATH } = require('./db');
+const { db, DB_PATH, seedDayRounds } = require('./db');
 const content = require('./lib/content');
 const schedule = require('./lib/schedule');
+const score = require('./lib/score');
+const aiGrade = require('./lib/aiGrade');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -100,7 +102,7 @@ function normName(s) {
 function findByName(name) {
   const key = normName(name);
   if (!key) return null;
-  const all = db.prepare('SELECT * FROM examinees').all();
+  const all = db.prepare('SELECT * FROM examinees WHERE day_id IS ? OR day_id = ?').all(activeDayId(), activeDayId());
   return all.find((e) => normName(e.name) === key) || null;
 }
 // מזהה פנימי קבוע ונסתר לכל נבחן (עליו יושבות תשובות/משבצות/ריאיונות). לא נחשף לנבחן.
@@ -125,6 +127,22 @@ function authExaminee(req, res, next) {
   next();
 }
 
+// ---------- תפקיד שלישי: מראיין ----------
+// כניסה בסיסמה משותפת + בחירת שם מהרשימה. המראיין הוא *קורא בלבד* על הלו"ז —
+// הוא יכול לבקש החלפה, והמנהל מאשר. כך אין שני גורמים שכותבים לאותו מקום.
+const INTERVIEWER_PASSWORD = process.env.INTERVIEWER_PASSWORD || 'interview';
+const interviewerTokens = new Map();   // token -> interviewer_id
+
+function authInterviewer(req, res, next) {
+  const token = (req.headers['x-token'] || '').trim();
+  if (!interviewerTokens.has(token)) return res.status(401).json({ error: 'גישת מראיין נדחתה.' });
+  const id = interviewerTokens.get(token);
+  const iv = db.prepare('SELECT * FROM interviewers WHERE id = ?').get(id);
+  if (!iv) return res.status(401).json({ error: 'המראיין אינו קיים יותר.' });
+  req.interviewer = iv;
+  next();
+}
+
 function authExaminer(req, res, next) {
   const token = (req.headers['x-token'] || '').trim();
   if (!examinerTokens.has(token)) return res.status(401).json({ error: 'גישת בוחן נדחתה.' });
@@ -145,20 +163,80 @@ function setConfig(key, value) {
     .run(key, String(value));
 }
 
-// ---------- מצב סבבים (מודל חי) ----------
+// ---------- יום הערכה (הפרדה בין ימים) ----------
+// כל הנתונים התפעוליים שייכים ליום הפעיל. נבחן משויך ליום דרך examinees.day_id,
+// ומכיוון שתשובות/משבצות/ריאיונות תלויים ב-code של הנבחן — הם נפרדים מעצמם.
+const MIN_ROUNDS = 3;   // תנאי בסיס: מידע כללי + מקצוע + ריאיון
+const MAX_ROUNDS = 5;
+
+function activeDayId() {
+  const v = getConfig('active_day_id');
+  if (v) return Number(v);
+  const row = db.prepare('SELECT id FROM days ORDER BY id DESC LIMIT 1').get();
+  if (row) { setConfig('active_day_id', row.id); return row.id; }
+  return null;
+}
+function activeDay() {
+  const id = activeDayId();
+  return id ? db.prepare('SELECT * FROM days WHERE id = ?').get(id) : null;
+}
+// מספר הסבבים של היום הפעיל (3..5). מחליף את schedule.NUM_ROUNDS הקבוע.
+function totalRounds() {
+  const d = activeDay();
+  const n = d ? Number(d.total_rounds) : schedule.NUM_ROUNDS;
+  return Math.max(MIN_ROUNDS, Math.min(MAX_ROUNDS, n || schedule.NUM_ROUNDS));
+}
+// כמה מקצועות הנבחן בוחר: תמיד «מידע כללי» + ריאיון, והשאר מקצועות שבחר.
+function chosenSubjectCount() {
+  return Math.max(1, totalRounds() - 2);
+}
+function dayPhase() {
+  const d = activeDay();
+  return d ? (d.phase || 'registration') : 'registration';
+}
+
+// ---------- מצב סבבים (מודל חי, פר-יום) ----------
 function roundState(r) {
-  const row = db.prepare('SELECT state FROM rounds WHERE round = ?').get(r);
+  const row = db.prepare('SELECT state FROM day_rounds WHERE day_id = ? AND round = ?').get(activeDayId(), r);
   return row ? row.state : 'planned';
 }
 // הסבב שרץ כרגע (0 אם אין)
 function currentRunningRound() {
-  const row = db.prepare("SELECT MAX(round) AS r FROM rounds WHERE state = 'running'").get();
+  const row = db.prepare("SELECT MAX(round) AS r FROM day_rounds WHERE day_id = ? AND state = 'running'").get(activeDayId());
   return row && row.r ? row.r : 0;
 }
 // הסבב הגבוה ביותר שכבר התחיל (running/ended)
 function latestActiveRound() {
-  const row = db.prepare("SELECT MAX(round) AS r FROM rounds WHERE state != 'planned'").get();
+  const row = db.prepare("SELECT MAX(round) AS r FROM day_rounds WHERE day_id = ? AND state != 'planned'").get(activeDayId());
   return row && row.r ? row.r : 0;
+}
+// התאמת טבלת הסבבים למספר המבוקש. מוסיף חסרים; מוחק עודפים רק אם הם 'planned'
+// ואין להם משבצות — אחרת מחזיר שגיאה מסבירה (הגנה על תיקון-טעות בלייב).
+function reconcileRounds(dayId, n) {
+  const rows = db.prepare('SELECT round, state FROM day_rounds WHERE day_id = ? ORDER BY round').all(dayId);
+  const have = rows.map((r) => r.round);
+  const maxHave = have.length ? Math.max(...have) : 0;
+  for (let r = 1; r <= n; r++) {
+    if (!have.includes(r)) {
+      db.prepare('INSERT OR IGNORE INTO day_rounds (day_id, round, code, released, state) VALUES (?, ?, ?, 0, ?)')
+        .run(dayId, r, 'round' + r, 'planned');
+    }
+  }
+  for (let r = n + 1; r <= maxHave; r++) {
+    const row = rows.find((x) => x.round === r);
+    if (!row) continue;
+    if (row.state !== 'planned') {
+      throw Object.assign(new Error('סבב ' + r + ' כבר רץ או הסתיים — אפסו אותו לפני הקטנת מספר הסבבים.'), { status: 400 });
+    }
+    const used = db.prepare(
+      'SELECT COUNT(*) AS c FROM slots WHERE round = ? AND code IN (SELECT code FROM examinees WHERE day_id = ?)'
+    ).get(r, dayId).c;
+    if (used > 0) {
+      throw Object.assign(new Error('בסבב ' + r + ' יש נבחנים משובצים — אפסו את הסבב לפני ההקטנה.'), { status: 400 });
+    }
+    db.prepare('DELETE FROM day_rounds WHERE day_id = ? AND round = ?').run(dayId, r);
+    db.prepare('DELETE FROM interview_marks WHERE round = ? AND code IN (SELECT code FROM examinees WHERE day_id = ?)').run(r, dayId);
+  }
 }
 
 // ---------- התקדמות פר-נבחן (נגזרת מ-slots + interview_marks) ----------
@@ -189,8 +267,16 @@ function hasInterviewed(code) {
 function isMarkedInterview(round, code) {
   return !!db.prepare('SELECT 1 FROM interview_marks WHERE round = ? AND code = ?').get(round, code);
 }
+// לאן הנבחן הולך לריאיון: שם המראיין והחדר (מראיין = חדר קבוע). ריק אם לא שובץ.
+function interviewWhere(code, round) {
+  if (!round) return { interviewer: null, room: null };
+  const row = db.prepare(`SELECT i.name AS name, i.room AS room
+                          FROM interview_marks m JOIN interviewers i ON i.id = m.interviewer_id
+                          WHERE m.code = ? AND m.round = ?`).get(code, round);
+  return { interviewer: row ? row.name : null, room: row ? (row.room || null) : null };
+}
 function chapterListForEx(ex) {
-  return schedule.chapterListFor(JSON.parse(ex.subjects || '[]'), ex.math_level);
+  return schedule.chapterListFor(JSON.parse(ex.subjects || '[]'), ex.math_level, chosenSubjectCount());
 }
 
 // מה נבחן עושה בסבב נתון (מחושב בעת התחלת הסבב). מחזיר תיאור משבצת או null (idle).
@@ -262,7 +348,7 @@ function ensureSlotStarted(code, round) {
 // ---------- בניית מצב מלא לנבחן (לשחזור מדויק) ----------
 function buildExamineeState(ex) {
   const running = currentRunningRound();
-  const totalRounds = schedule.NUM_ROUNDS;
+  const total = totalRounds();
   const state = {
     examinee: {
       name: ex.name,
@@ -270,7 +356,7 @@ function buildExamineeState(ex) {
       subjects: JSON.parse(ex.subjects || '[]'),
       math_level: ex.math_level,
     },
-    rounds: { current: running, total: totalRounds },
+    rounds: { current: running, total: total },
     server_now: now(),
   };
 
@@ -278,6 +364,13 @@ function buildExamineeState(ex) {
   if (getConfig('exam_ended') === '1') {
     state.phase = 'ended';
     state.message = 'המבחן הסתיים. תודה רבה! אפשר לסגור את החלון.';
+    return state;
+  }
+
+  // שלב ההרשמה של הבוקר: נרשמנו — וממתינים. בלי חשיפה להוראות/הצהרה/מקצועות.
+  if (dayPhase() === 'registration') {
+    state.phase = 'registered_waiting';
+    state.message = 'ההרשמה נרשמה בהצלחה. נתראה בתחילת המבחן — אפשר לסגור את החלון ולחזור לכאן בהמשך.';
     return state;
   }
 
@@ -291,8 +384,9 @@ function buildExamineeState(ex) {
 
   // יצא לריאיון (טיימר הפרק מושהה) — מסך ריאיון עד לחזרה
   if (ex.in_interview) {
+    const r = currentRunningRound();
     state.phase = 'interview';
-    state.slot = { round: currentRunningRound(), kind: 'interview' };
+    state.slot = Object.assign({ round: r, kind: 'interview' }, interviewWhere(ex.code, r));
     state.message = 'יצאת לריאיון — הטיימר מושהה. כשתחזור/י תמשיך/י בדיוק מהמקום.';
     return state;
   }
@@ -327,9 +421,12 @@ function buildExamineeState(ex) {
   }
 
   if (slot.kind === 'interview') {
+    const where = interviewWhere(ex.code, slot.round);
     state.phase = 'interview';
-    state.slot = { round: slot.round, kind: 'interview' };
-    state.message = 'זהו סבב הריאיון שלך — צא/צאי לריאיון. הטיימר מושהה עד לחזרה.';
+    state.slot = Object.assign({ round: slot.round, kind: 'interview' }, where);
+    state.message = where.room || where.interviewer
+      ? 'זהו סבב הריאיון שלך — הגע/י לחדר המצוין למטה.'
+      : 'זהו סבב הריאיון שלך — צא/צאי לריאיון. הטיימר מושהה עד לחזרה.';
     return state;
   }
 
@@ -372,6 +469,56 @@ app.get('/api/subjects', (req, res) => {
   res.json({ subjects: content.listSubjects().filter((s) => s !== schedule.GENERAL_SUBJECT) });
 });
 
+// מידע ציבורי על היום: כותרת לדף הכניסה + השלב (registration/open) — כדי שדף
+// הכניסה ידע להציג «הרשמה לבחינה» ולא לחשוף את ההמשך.
+app.get('/api/day-info', (req, res) => {
+  const d = activeDay();
+  res.json({
+    title: (d && d.title) || 'יום הערכה תשפ״ז',
+    phase: dayPhase(),
+    subject_count: chosenSubjectCount(),
+    total_rounds: totalRounds(),
+  });
+});
+
+// רשימת השמות שהמנהל הזין ליום — לבחירה בהרשמת הבוקר (מונע כפילויות שמות).
+// מחזיר שמות בלבד (בלי קודים), ורק של מי שעדיין לא נרשם בפועל.
+app.get('/api/day-names', (req, res) => {
+  const rows = db.prepare('SELECT name, pin FROM examinees WHERE day_id = ? ORDER BY name').all(activeDayId());
+  res.json({ names: rows.map((r) => r.name) });
+});
+
+// הרשמת בוקר: שם + קוד אישי בלבד. לא נוגע בהצהרה/מקצועות — אלה יבואו
+// כשהמנהל יפתח את היום. מסמן דגל אם השם לא היה ברשימה שהמנהל הזין.
+app.post('/api/register-morning', (req, res) => {
+  const { name, code } = req.body || {};
+  if (!name || !code) return res.status(400).json({ error: 'נדרשים שם וקוד אישי.' });
+  const cleanName = normName(name);
+  const cleanCode = String(code).trim();
+  if (!cleanName) return res.status(400).json({ error: 'נדרש שם.' });
+
+  const existing = findByName(cleanName);
+  if (existing) {
+    if (!pinMatches(existing, cleanCode)) {
+      return res.status(409).json({ error: 'השם הזה כבר רשום עם קוד אחר. אם זה את/ה — הזן/י את הקוד שבחרת. אחרת פנה/י למנהל.' });
+    }
+    const token = newToken();
+    if (!String(existing.pin || '').trim()) db.prepare('UPDATE examinees SET pin = ? WHERE code = ?').run(cleanCode, existing.code);
+    db.prepare("UPDATE examinees SET token = ?, status = CASE WHEN status = 'left' THEN 'left' ELSE status END WHERE code = ?").run(token, existing.code);
+    logEvent(existing.code, 'register_morning', 'existing');
+    return res.json({ token, restored: true, state: buildExamineeState(getExamineeByCode.get(existing.code)) });
+  }
+
+  // שם שאינו ברשימה — נרשם בכל זאת (כדי לא לחסום נבחן בבוקר), אבל מסומן לבדיקה.
+  const token = newToken();
+  const internalCode = genCode();
+  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status, day_id, self_registered)
+              VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'registered', ?, 1)`).run(
+    internalCode, cleanName, cleanCode, token, JSON.stringify(null), JSON.stringify([]), now(), activeDayId());
+  logEvent(internalCode, 'register_morning', 'new (self)');
+  res.json({ token, restored: false, self_registered: true, state: buildExamineeState(getExamineeByCode.get(internalCode)) });
+});
+
 // רישום נבחן חדש (או שחזור אם הקוד כבר קיים עם אותו שם)
 app.post('/api/register', (req, res) => {
   const { name, code, declaration, subjects, math_level } = req.body || {};
@@ -394,21 +541,21 @@ app.post('/api/register', (req, res) => {
   }
 
   const chosenSubjects = Array.isArray(subjects)
-    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, schedule.NUM_CHOSEN) : [];
+    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, chosenSubjectCount()) : [];
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
-  if (schedule.chosenChapterCount(chosenSubjects, mathLevel) < schedule.NUM_CHOSEN) {
-    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-3 פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
+  if (schedule.chosenChapterCount(chosenSubjects, mathLevel, chosenSubjectCount()) < chosenSubjectCount()) {
+    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-' + chosenSubjectCount() + ' פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
   }
 
   const token = newToken();
   const internalCode = genCode();
-  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'active')`).run(
+  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status, day_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'active', ?)`).run(
     internalCode, cleanName, cleanCode, token,
     JSON.stringify(declaration || null),
     JSON.stringify(chosenSubjects),
-    mathLevel, now()
+    mathLevel, now(), activeDayId()
   );
   // אין בניית slots מראש — הן נבנות חי כשהמנהל מתחיל סבב.
   logEvent(internalCode, 'register', cleanName);
@@ -419,12 +566,12 @@ app.post('/api/register', (req, res) => {
 app.post('/api/complete-setup', authExaminee, (req, res) => {
   const { subjects, math_level, declaration } = req.body || {};
   const chosenSubjects = Array.isArray(subjects)
-    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, schedule.NUM_CHOSEN) : [];
+    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, chosenSubjectCount()) : [];
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const ex = req.examinee;
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
-  if (schedule.chosenChapterCount(chosenSubjects, mathLevel) < schedule.NUM_CHOSEN) {
-    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-3 פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
+  if (schedule.chosenChapterCount(chosenSubjects, mathLevel, chosenSubjectCount()) < chosenSubjectCount()) {
+    return res.status(400).json({ error: 'המקצועות שנבחרו אינם מספיקים ל-' + chosenSubjectCount() + ' פרקים. יש להוסיף מקצוע נוסף (למשל, אי אפשר להיבחן רק על «יזמות גירלס פלוס»).' });
   }
   db.prepare('UPDATE examinees SET subjects = ?, math_level = ?, declaration = ?, status = ? WHERE code = ?')
     .run(JSON.stringify(chosenSubjects), mathLevel, JSON.stringify(declaration || null), 'active', ex.code);
@@ -574,13 +721,162 @@ app.post('/api/examiner/login', (req, res) => {
   res.json({ token });
 });
 
+// ============================================================
+//  מסך המראיין
+// ============================================================
+// רשימת המראיינים של היום — לבחירת שם במסך הכניסה (שמות וחדרים בלבד).
+app.get('/api/interviewers-public', (req, res) => {
+  const rows = db.prepare('SELECT id, name, room FROM interviewers WHERE day_id = ? AND active = 1 ORDER BY name').all(activeDayId());
+  res.json({ interviewers: rows });
+});
+
+app.post('/api/interviewer/login', (req, res) => {
+  const { password, interviewer_id } = req.body || {};
+  if (String(password || '') !== INTERVIEWER_PASSWORD) return res.status(401).json({ error: 'סיסמה שגויה.' });
+  const iv = db.prepare('SELECT * FROM interviewers WHERE id = ? AND day_id = ?').get(Number(interviewer_id), activeDayId());
+  if (!iv) return res.status(404).json({ error: 'יש לבחור שם מהרשימה.' });
+  const token = newToken();
+  interviewerTokens.set(token, iv.id);
+  res.json({ token, interviewer: { id: iv.id, name: iv.name, room: iv.room || '', brief: iv.brief || '' } });
+});
+
+// הלו"ז של המראיין: הסבב הנוכחי (מתי התחיל/מסתיים) + מי אצלו בכל סבב + בריף
+app.get('/api/interviewer/schedule', authInterviewer, (req, res) => {
+  const iv = req.interviewer;
+  const running = currentRunningRound();
+  const roundsArr = db.prepare('SELECT round, state, started_at FROM day_rounds WHERE day_id = ? ORDER BY round').all(activeDayId());
+
+  // חלון הזמן של הסבב הרץ — נגזר מהמשבצות הפעילות (אותו טיימר של הנבחנים)
+  let current = null;
+  if (running) {
+    const row = db.prepare(`SELECT MIN(s.started_at) AS started, MAX(s.duration_sec) AS dur
+                            FROM slots s JOIN examinees e ON e.code = s.code
+                            WHERE s.round = ? AND e.day_id = ? AND s.started_at IS NOT NULL`).get(running, activeDayId());
+    const rstate = roundsArr.find((r) => r.round === running) || {};
+    const startedAt = (row && row.started) || rstate.started_at || null;
+    const durSec = (row && row.dur) || SLOT_DURATION_SEC;
+    current = {
+      round: running,
+      started_at: startedAt,
+      ends_at: startedAt ? startedAt + durSec * 1000 : null,
+      duration_sec: durSec,
+    };
+  }
+
+  const marks = db.prepare(`SELECT m.round, m.code, e.name, e.interview_brief, e.interviewed, e.in_interview, e.status
+                            FROM interview_marks m JOIN examinees e ON e.code = m.code
+                            WHERE m.interviewer_id = ? AND e.day_id = ?
+                            ORDER BY m.round, e.name`).all(iv.id, activeDayId());
+  const schedule_rows = marks.map((m) => {
+    const st = roundsArr.find((r) => r.round === m.round);
+    const rs = st ? st.state : 'planned';
+    let status = 'ממתין';
+    if (m.in_interview) status = 'אצלי כרגע';
+    else if (m.interviewed) status = 'הסתיים';
+    else if (rs === 'running') status = 'הסבב שלי — רץ עכשיו';
+    else if (rs === 'ended') status = 'הסתיים';
+    return {
+      round: m.round, code: m.code, name: m.name, brief: m.interview_brief || '',
+      status, round_state: rs, left: m.status === 'left',
+      in_interview: !!m.in_interview, interviewed: !!m.interviewed,
+    };
+  });
+
+  const day = activeDay();
+  res.json({
+    interviewer: { id: iv.id, name: iv.name, room: iv.room || '', brief: iv.brief || '' },
+    day: day ? { name: day.name, title: day.title, total_rounds: day.total_rounds, phase: day.phase } : null,
+    running, rounds: roundsArr, current, schedule: schedule_rows,
+    server_now: now(),
+    my_swaps: db.prepare('SELECT id, round, code, requested_change, status, created_at FROM interview_swap_requests WHERE interviewer_id = ? AND day_id = ? ORDER BY id DESC LIMIT 20').all(iv.id, activeDayId()),
+  });
+});
+
+// בקשת החלפה — המראיין מבקש, המנהל מאשר (ואז זה מבוצע בפועל)
+app.post('/api/interviewer/swap-request', authInterviewer, (req, res) => {
+  const b = req.body || {};
+  const txt = String(b.requested_change || '').trim();
+  if (!txt) return res.status(400).json({ error: 'יש לכתוב מה מבקשים לשנות.' });
+  db.prepare(`INSERT INTO interview_swap_requests (day_id, interviewer_id, code, round, requested_change, status, created_at)
+              VALUES (?, ?, ?, ?, ?, 'pending', ?)`).run(
+    activeDayId(), req.interviewer.id, b.code || null, b.round ? Number(b.round) : null, txt.slice(0, 1000), now());
+  logEvent(b.code || null, 'swap_request', req.interviewer.name + ': ' + txt.slice(0, 120));
+  res.json({ ok: true });
+});
+
+// ============================================================
+//  ניהול ימי הערכה («הקם יום הערכה»)
+// ============================================================
+// רשימת הימים + היום הפעיל. לכל יום מוצג כמה נבחנים יש בו.
+app.get('/api/examiner/days', authExaminer, (req, res) => {
+  const days = db.prepare('SELECT * FROM days ORDER BY id DESC').all().map((d) => ({
+    ...d,
+    examinees: db.prepare('SELECT COUNT(*) AS c FROM examinees WHERE day_id = ?').get(d.id).c,
+  }));
+  res.json({ days, active_day_id: activeDayId(), min_rounds: MIN_ROUNDS, max_rounds: MAX_ROUNDS });
+});
+
+// יצירת יום הערכה חדש (ומיד הופך לפעיל) — הנתונים של הימים הקודמים נשמרים במלואם.
+app.post('/api/examiner/create-day', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const name = normName(b.name) || ('יום הערכה ' + new Date().toLocaleDateString('he-IL'));
+  let n = Number(b.total_rounds) || 5;
+  n = Math.max(MIN_ROUNDS, Math.min(MAX_ROUNDS, n));
+  const title = String(b.title || 'יום הערכה תשפ״ז').slice(0, 120);
+  makeBackup('create-day');
+  const info = db.prepare('INSERT INTO days (name, title, total_rounds, phase, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(name, title, n, 'registration', 'open', now());
+  const dayId = Number(info.lastInsertRowid);
+  seedDayRounds(dayId, n, false);
+  setConfig('active_day_id', dayId);
+  setConfig('exam_ended', '0');
+  logEvent(null, 'create_day', name + ' · ' + n + ' סבבים');
+  res.json({ ok: true, day_id: dayId });
+});
+
+// מעבר בין ימים (לצפייה/עריכה של יום קודם)
+app.post('/api/examiner/set-active-day', authExaminer, (req, res) => {
+  const id = Number((req.body || {}).day_id);
+  const d = db.prepare('SELECT id FROM days WHERE id = ?').get(id);
+  if (!d) return res.status(404).json({ error: 'יום לא נמצא.' });
+  setConfig('active_day_id', id);
+  res.json({ ok: true, active_day_id: id });
+});
+
+// עריכת היום הפעיל: שם, כותרת לנבחן, מספר סבבים (3–5), שלב היום.
+app.post('/api/examiner/update-day', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const day = activeDay();
+  if (!day) return res.status(400).json({ error: 'אין יום פעיל.' });
+  try {
+    if (b.total_rounds != null) {
+      let n = Number(b.total_rounds);
+      if (!(n >= MIN_ROUNDS && n <= MAX_ROUNDS)) {
+        return res.status(400).json({ error: 'מספר הסבבים חייב להיות בין ' + MIN_ROUNDS + ' ל-' + MAX_ROUNDS + '. תנאי בסיס: פרק «מידע כללי», פרק מקצוע אחד לפחות, וריאיון.' });
+      }
+      makeBackup('set-rounds');
+      reconcileRounds(day.id, n);   // זורק שגיאה מסבירה אם אי אפשר להקטין
+      db.prepare('UPDATE days SET total_rounds = ? WHERE id = ?').run(n, day.id);
+    }
+    if (b.name != null) db.prepare('UPDATE days SET name = ? WHERE id = ?').run(normName(b.name).slice(0, 120), day.id);
+    if (b.title != null) db.prepare('UPDATE days SET title = ? WHERE id = ?').run(String(b.title).slice(0, 120), day.id);
+    if (b.phase != null) {
+      const ph = ['registration', 'open', 'running'].includes(b.phase) ? b.phase : 'registration';
+      db.prepare('UPDATE days SET phase = ? WHERE id = ?').run(ph, day.id);
+    }
+    res.json({ ok: true, day: activeDay() });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
 app.get('/api/examiner/rounds', authExaminer, (req, res) => {
-  res.json({ rounds: db.prepare('SELECT round, code, released, released_at FROM rounds ORDER BY round').all() });
+  res.json({ rounds: db.prepare('SELECT round, code, released, released_at FROM day_rounds WHERE day_id = ? ORDER BY round').all(activeDayId()) });
 });
 
 app.post('/api/examiner/set-round-code', authExaminer, (req, res) => {
   const { round, code } = req.body || {};
-  db.prepare('UPDATE rounds SET code = ? WHERE round = ?').run(String(code || ''), Number(round));
+  db.prepare('UPDATE day_rounds SET code = ? WHERE day_id = ? AND round = ?').run(String(code || ''), activeDayId(), Number(round));
   res.json({ ok: true });
 });
 
@@ -594,12 +890,12 @@ app.post('/api/examiner/add-examinee', authExaminer, (req, res) => {
   const chosen = Array.isArray(subjects) ? subjects.filter(Boolean).slice(0, 4) : [];
   const mathLevel = chosen.includes('מתמטיקה') ? (math_level || '5') : null;
   const internalCode = genCode();
-  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`).run(
+  db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status, day_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`).run(
     internalCode, cleanName, cleanPin, newToken(), JSON.stringify(null), JSON.stringify(chosen), mathLevel, now(),
-    chosen.length ? 'active' : 'registered');
+    chosen.length ? 'active' : 'registered', activeDayId());
   const r = Number(interview_round);
-  if (r >= 1 && r <= schedule.NUM_ROUNDS) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, internalCode);
+  if (r >= 1 && r <= totalRounds()) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, internalCode);
   logEvent(internalCode, 'preregister', cleanName);
   res.json({ ok: true, code: internalCode, needs_setup: chosen.length === 0 });
 });
@@ -614,13 +910,13 @@ app.post('/api/examiner/add-examinees-bulk', authExaminer, (req, res) => {
     const parts = line.split(/[,\t;]/).map((s) => s.trim());
     const name = parts[0], pin = parts[1] || ''; // קוד אישי אופציונלי
     const roundRaw = parts[2] !== undefined ? Number(parts[2]) : null;
-    const iRound = roundRaw && roundRaw >= 1 && roundRaw <= schedule.NUM_ROUNDS ? roundRaw : null;
+    const iRound = roundRaw && roundRaw >= 1 && roundRaw <= totalRounds() ? roundRaw : null;
     if (!name) { skipped.push(line + ' (חסר שם)'); continue; }
     if (findByName(name)) { skipped.push(name + ' (כבר קיים)'); continue; }
     const internalCode = genCode();
-    db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'registered')`).run(
-      internalCode, name, pin, newToken(), JSON.stringify(null), JSON.stringify([]), null, now());
+    db.prepare(`INSERT INTO examinees (code, name, pin, token, declaration, subjects, math_level, interview_round, created_at, status, day_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 'registered', ?)`).run(
+      internalCode, name, pin, newToken(), JSON.stringify(null), JSON.stringify([]), null, now(), activeDayId());
     if (iRound) db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(iRound, internalCode);
     added++;
   }
@@ -633,7 +929,7 @@ app.post('/api/examiner/mark-interview', authExaminer, (req, res) => {
   const { code, round, on } = req.body || {};
   if (!code) return res.status(400).json({ error: 'חסר קוד נבחן.' });
   const r = Number(round);
-  if (!r || r < 1 || r > schedule.NUM_ROUNDS) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
+  if (!r || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
   if (roundState(r) !== 'planned') return res.status(400).json({ error: 'אפשר לסמן רק סבב שעדיין לא התחיל.' });
   const ex = getExamineeByCode.get(code);
   if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
@@ -641,7 +937,7 @@ app.post('/api/examiner/mark-interview', authExaminer, (req, res) => {
     if (hasInterviewed(code)) return res.json({ ok: false, warn: 'נבחן זה כבר התראיין — אין צורך לסמן שוב.' });
     db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, code);
     // ריאיון פעם אחת: מסירים סימון מכל סבב planned אחר
-    db.prepare("DELETE FROM interview_marks WHERE code = ? AND round != ? AND round IN (SELECT round FROM rounds WHERE state = 'planned')").run(code, r);
+    db.prepare("DELETE FROM interview_marks WHERE code = ? AND round != ? AND round IN (SELECT round FROM day_rounds WHERE day_id = ? AND state = 'planned')").run(code, r, activeDayId());
   } else {
     db.prepare('DELETE FROM interview_marks WHERE round = ? AND code = ?').run(r, code);
   }
@@ -656,7 +952,7 @@ app.post('/api/examiner/set-interview-plan', authExaminer, (req, res) => {
   for (const line of lines) {
     const parts = line.split(/[,\t;]/).map((s) => s.trim());
     const key = parts[0]; const r = Number(parts[1]);
-    if (!key || !(r >= 1 && r <= schedule.NUM_ROUNDS)) { skipped.push(line); continue; }
+    if (!key || !(r >= 1 && r <= totalRounds())) { skipped.push(line); continue; }
     const ex = findByName(key) || getExamineeByCode.get(key);
     if (!ex) { skipped.push(line + ' (לא נמצא)'); continue; }
     if (roundState(r) !== 'planned') { skipped.push(line + ' (הסבב כבר התחיל)'); continue; }
@@ -680,8 +976,8 @@ app.post('/api/examiner/remove-examinee', authExaminer, (req, res) => {
 // תכנון הסבבים (טבלת rounds) נשמר. גיבוי אוטומטי לפני.
 app.post('/api/examiner/remove-all-examinees', authExaminer, (req, res) => {
   makeBackup('pre-remove-all-examinees');
-  const n = db.prepare('SELECT COUNT(*) AS c FROM examinees').get().c;
-  db.prepare('DELETE FROM examinees').run();
+  const n = db.prepare('SELECT COUNT(*) AS c FROM examinees WHERE day_id = ?').get(activeDayId()).c;
+  db.prepare('DELETE FROM examinees WHERE day_id = ?').run(activeDayId());
   logEvent(null, 'remove_all_examinees', String(n));
   res.json({ ok: true, removed: n });
 });
@@ -708,13 +1004,13 @@ app.post('/api/examiner/edit-examinee', authExaminer, (req, res) => {
 // התחלת סבב — בונה חי לכל נבחן פעיל את המשבצת שלו (ריאיון לפי סימון, אחרת הפרק הבא)
 app.post('/api/examiner/start-round', authExaminer, (req, res) => {
   const r = Number((req.body || {}).round);
-  if (!r || r < 1 || r > schedule.NUM_ROUNDS) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
+  if (!r || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
   if (roundState(r) !== 'planned') return res.status(400).json({ error: 'הסבב כבר התחיל.' });
   if (r > 1 && roundState(r - 1) !== 'ended') return res.status(400).json({ error: `יש לסיים קודם את סבב ${r - 1}.` });
   const running = currentRunningRound();
   if (running) return res.status(400).json({ error: `סבב ${running} עדיין פועל — סיים אותו קודם.` });
 
-  const examinees = db.prepare("SELECT * FROM examinees WHERE status = 'active'").all();
+  const examinees = db.prepare("SELECT * FROM examinees WHERE status = 'active' AND day_id = ?").all(activeDayId());
   const insSlot = db.prepare(`INSERT INTO slots (code, round, kind, subject, level, chapter_id, duration_sec)
                               VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code, round) DO NOTHING`);
   let chapters = 0, interviews = 0;
@@ -725,7 +1021,7 @@ app.post('/api/examiner/start-round', authExaminer, (req, res) => {
     insSlot.run(ex.code, r, act.kind, act.subject, act.level, act.chapter_id, SLOT_DURATION_SEC);
     if (act.kind === 'interview') interviews++; else chapters++;
   }
-  db.prepare("UPDATE rounds SET state = 'running', started_at = ?, released = 1, released_at = ? WHERE round = ?").run(now(), now(), r);
+  db.prepare("UPDATE day_rounds SET state = 'running', started_at = ?, released = 1, released_at = ? WHERE day_id = ? AND round = ?").run(now(), now(), activeDayId(), r);
   logEvent(null, 'start_round', `round ${r} · ${interviews} ריאיון · ${chapters} פרק`);
   res.json({ ok: true, round: r, interviews, chapters });
 });
@@ -750,7 +1046,7 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
     }
   }
   db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'").run(r);
-  db.prepare("UPDATE rounds SET state = 'ended' WHERE round = ?").run(r);
+  db.prepare("UPDATE day_rounds SET state = 'ended' WHERE day_id = ? AND round = ?").run(activeDayId(), r);
   logEvent(null, 'end_round', String(r));
   res.json({ ok: true, round: r });
 });
@@ -764,7 +1060,7 @@ app.post('/api/examiner/reset-round', authExaminer, (req, res) => {
   // ביטול סימון "התראיין" למי שהריאיון שלו היה בסבב הזה
   db.prepare("UPDATE examinees SET interviewed = 0 WHERE code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(r);
   db.prepare('DELETE FROM slots WHERE round = ?').run(r);
-  db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE round = ?").run(r);
+  db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ? AND round = ?").run(activeDayId(), r);
   logEvent(null, 'reset_round', String(r));
   res.json({ ok: true, round: r });
 });
@@ -785,7 +1081,7 @@ app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
   db.prepare('DELETE FROM slots').run();
   db.prepare('DELETE FROM answers').run();
   db.prepare('UPDATE examinees SET interviewed = 0, in_interview = 0').run();
-  db.prepare("UPDATE rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL").run();
+  db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ?").run(activeDayId());
   setConfig('exam_ended', '0');
   logEvent(null, 'full_reset', '');
   res.json({ ok: true });
@@ -860,12 +1156,109 @@ app.post('/api/examiner/set-left', authExaminer, (req, res) => {
   res.json({ ok: true });
 });
 
+// ============================================================
+//  מראיינים וחדרים (מראיין = חדר קבוע ליום)
+// ============================================================
+app.get('/api/examiner/interviewers', authExaminer, (req, res) => {
+  const rows = db.prepare('SELECT * FROM interviewers WHERE day_id = ? ORDER BY id').all(activeDayId());
+  const marks = db.prepare('SELECT round, code, interviewer_id FROM interview_marks').all();
+  res.json({
+    interviewers: rows.map((v) => ({
+      id: v.id, name: v.name, room: v.room || '', brief: v.brief || '', active: !!v.active,
+      load: marks.filter((m) => m.interviewer_id === v.id).length,
+    })),
+  });
+});
+
+app.post('/api/examiner/add-interviewer', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const name = normName(b.name);
+  if (!name) return res.status(400).json({ error: 'נדרש שם מראיין.' });
+  const dayId = activeDayId();
+  const dup = db.prepare('SELECT id FROM interviewers WHERE day_id = ? AND name = ?').get(dayId, name);
+  if (dup) return res.status(409).json({ error: 'מראיין בשם הזה כבר קיים ביום הזה.' });
+  const info = db.prepare('INSERT INTO interviewers (day_id, name, room, brief, active, created_at) VALUES (?, ?, ?, ?, 1, ?)')
+    .run(dayId, name, String(b.room || '').trim(), String(b.brief || '').trim(), now());
+  res.json({ ok: true, id: Number(info.lastInsertRowid) });
+});
+
+// הוספת רשימה: שורה לכל מראיין — "שם, חדר"
+app.post('/api/examiner/add-interviewers-bulk', authExaminer, (req, res) => {
+  const lines = String((req.body && req.body.text) || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const dayId = activeDayId();
+  let added = 0; const skipped = [];
+  for (const line of lines) {
+    const parts = line.split(/[,\t;]/).map((s) => s.trim());
+    const name = normName(parts[0]); const room = parts[1] || '';
+    if (!name) { skipped.push(line + ' (חסר שם)'); continue; }
+    if (db.prepare('SELECT id FROM interviewers WHERE day_id = ? AND name = ?').get(dayId, name)) { skipped.push(name + ' (כבר קיים)'); continue; }
+    db.prepare('INSERT INTO interviewers (day_id, name, room, brief, active, created_at) VALUES (?, ?, ?, ?, 1, ?)')
+      .run(dayId, name, room, '', now());
+    added++;
+  }
+  res.json({ ok: true, added, skipped });
+});
+
+app.post('/api/examiner/edit-interviewer', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const id = Number(b.id);
+  const v = db.prepare('SELECT * FROM interviewers WHERE id = ? AND day_id = ?').get(id, activeDayId());
+  if (!v) return res.status(404).json({ error: 'מראיין לא נמצא.' });
+  const name = b.name != null ? normName(b.name) : v.name;
+  if (!name) return res.status(400).json({ error: 'נדרש שם.' });
+  db.prepare('UPDATE interviewers SET name = ?, room = ?, brief = ?, active = ? WHERE id = ?').run(
+    name,
+    b.room != null ? String(b.room).trim() : (v.room || ''),
+    b.brief != null ? String(b.brief).trim() : (v.brief || ''),
+    b.active != null ? (b.active ? 1 : 0) : v.active,
+    id
+  );
+  res.json({ ok: true });
+});
+
+app.post('/api/examiner/remove-interviewer', authExaminer, (req, res) => {
+  const id = Number((req.body || {}).id);
+  const used = db.prepare('SELECT COUNT(*) AS c FROM interview_marks WHERE interviewer_id = ?').get(id).c;
+  if (used > 0) return res.status(400).json({ error: 'למראיין הזה יש ' + used + ' ריאיונות משובצים. יש להעביר אותם קודם.' });
+  db.prepare('DELETE FROM interviewers WHERE id = ? AND day_id = ?').run(id, activeDayId());
+  res.json({ ok: true });
+});
+
+// שיבוץ מראיין לריאיון של נבחן (בסבב מסוים). עובד גם בלייב.
+app.post('/api/examiner/assign-interviewer', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const ex = getExamineeByCode.get(b.code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const r = Number(b.round);
+  if (!r || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
+  const ivId = b.interviewer_id ? Number(b.interviewer_id) : null;
+  if (ivId && !db.prepare('SELECT id FROM interviewers WHERE id = ? AND day_id = ?').get(ivId, activeDayId())) {
+    return res.status(404).json({ error: 'מראיין לא נמצא.' });
+  }
+  // מסמן ריאיון בסבב הזה (אם עוד לא מסומן) ומצמיד מראיין
+  db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(r, ex.code);
+  db.prepare('UPDATE interview_marks SET interviewer_id = ? WHERE round = ? AND code = ?').run(ivId, r, ex.code);
+  logEvent(ex.code, 'assign_interviewer', 'סבב ' + r + ' · מראיין ' + (ivId || '—'));
+  res.json({ ok: true });
+});
+
+// בריף קצר על נבחן — מה שהמראיין שלו יראה
+app.post('/api/examiner/set-examinee-brief', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const ex = getExamineeByCode.get(b.code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  db.prepare('UPDATE examinees SET interview_brief = ? WHERE code = ?').run(String(b.brief || '').slice(0, 2000), ex.code);
+  res.json({ ok: true });
+});
+
 // חלוקה אוטומטית לקבוצות: מפזר את מי שעדיין לא משובץ לריאיון על פני הסבבים הפתוחים, שווה בשווה
 app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
-  const plannedRounds = db.prepare("SELECT round FROM rounds WHERE state = 'planned' ORDER BY round").all().map((r) => r.round);
+  const plannedRounds = db.prepare("SELECT round FROM day_rounds WHERE day_id = ? AND state = 'planned' ORDER BY round").all(activeDayId()).map((r) => r.round);
   if (!plannedRounds.length) return res.status(400).json({ error: 'אין סבבים פתוחים לתכנון.' });
-  const marked = new Set(db.prepare("SELECT code FROM interview_marks WHERE round IN (SELECT round FROM rounds WHERE state = 'planned')").all().map((r) => r.code));
-  const rows = db.prepare("SELECT code FROM examinees WHERE status = 'active' AND interviewed = 0 ORDER BY created_at").all().filter((r) => !marked.has(r.code));
+  const marked = new Set(db.prepare("SELECT code FROM interview_marks WHERE round IN (SELECT round FROM day_rounds WHERE day_id = ? AND state = 'planned')").all(activeDayId()).map((r) => r.code));
+  // כולל נבחנים במצב 'registered' — בשלב ההרשמה של הבוקר הם עדיין לא 'active',
+  // והמנהל צריך לשבץ להם ריאיונות בזמן הזה בדיוק.
+  const rows = db.prepare("SELECT code FROM examinees WHERE status != 'left' AND interviewed = 0 AND day_id = ? ORDER BY created_at").all(activeDayId()).filter((r) => !marked.has(r.code));
   let i = 0, assigned = 0;
   for (const ex of rows) {
     const round = plannedRounds[i % plannedRounds.length]; i++;
@@ -879,9 +1272,11 @@ app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
 // סטטוס חי של כל הנבחנים + מצב הסבבים + סימוני ריאיון
 app.get('/api/examiner/status', authExaminer, (req, res) => {
   const running = currentRunningRound();
-  const roundsArr = db.prepare('SELECT round, state, started_at FROM rounds ORDER BY round').all();
-  const marks = db.prepare('SELECT round, code FROM interview_marks').all();
-  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const roundsArr = db.prepare('SELECT round, state, started_at FROM day_rounds WHERE day_id = ? ORDER BY round').all(activeDayId());
+  const marks = db.prepare('SELECT round, code, interviewer_id FROM interview_marks').all();
+  const ivById = {};
+  db.prepare('SELECT * FROM interviewers WHERE day_id = ?').all(activeDayId()).forEach((v) => { ivById[v.id] = v; });
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId());
   const list = examinees.map((ex) => {
     const subjects = JSON.parse(ex.subjects || '[]');
     const setup = subjects.length > 0;
@@ -919,17 +1314,54 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
       needs_interview: setup && !interviewed && !finished && !left, finished,
       current, timer, answered, flags,
       marked_rounds: marks.filter((m) => m.code === ex.code).map((m) => m.round),
+      // ריאיון: מי מראיין ובאיזה חדר (מראיין = חדר קבוע)
+      interview_assign: marks.filter((m) => m.code === ex.code).map((m) => ({
+        round: m.round,
+        interviewer_id: m.interviewer_id || null,
+        interviewer: m.interviewer_id && ivById[m.interviewer_id] ? ivById[m.interviewer_id].name : null,
+        room: m.interviewer_id && ivById[m.interviewer_id] ? ivById[m.interviewer_id].room : null,
+      })),
+      interview_brief: ex.interview_brief || '',
+      self_registered: !!ex.self_registered,
     };
   });
-  res.json({ running, total_rounds: schedule.NUM_ROUNDS, rounds: roundsArr, examinees: list });
+  // פס מוכנות: תנאי הבסיס והשיבוץ — כדי שיהיה ברור מה חסר לפני שמתחילים
+  const relevant = list.filter((e) => !e.left);
+  const withRound = relevant.filter((e) => e.interviewed || e.marked_rounds.length > 0);
+  const withInterviewer = relevant.filter((e) => e.interviewed || e.interview_assign.some((a) => a.interviewer_id));
+  const ivList = db.prepare('SELECT * FROM interviewers WHERE day_id = ? ORDER BY id').all(activeDayId());
+  const readiness = {
+    total: relevant.length,
+    interview_assigned: withRound.length,
+    interviewer_assigned: withInterviewer.length,
+    all_have_interview: relevant.length > 0 && withRound.length === relevant.length,
+    all_have_interviewer: relevant.length > 0 && withInterviewer.length === relevant.length,
+    missing_interview: relevant.filter((e) => !e.interviewed && !e.marked_rounds.length).map((e) => e.name),
+    missing_interviewer: relevant.filter((e) => !e.interviewed && !e.interview_assign.some((a) => a.interviewer_id)).map((e) => e.name),
+    interviewers_without_room: ivList.filter((v) => !String(v.room || '').trim()).map((v) => v.name),
+    self_registered: list.filter((e) => e.self_registered).map((e) => e.name),
+    rounds_ok: totalRounds() >= MIN_ROUNDS,
+  };
+  const d = activeDay();
+  res.json({
+    running, total_rounds: totalRounds(), rounds: roundsArr, examinees: list,
+    day: d ? { id: d.id, name: d.name, title: d.title, total_rounds: d.total_rounds, phase: d.phase } : null,
+    subject_count: chosenSubjectCount(),
+    interviewers: ivList.map((v) => ({
+      id: v.id, name: v.name, room: v.room || '', active: !!v.active,
+      load: marks.filter((m) => m.interviewer_id === v.id).length,
+    })),
+    readiness,
+    pending_swaps: db.prepare("SELECT COUNT(*) AS c FROM interview_swap_requests WHERE day_id = ? AND status = 'pending'").get(activeDayId()).c,
+  });
 });
 
 // מטריצה מלאה: לכל נבחן שורת 5 תאים (סבב 1..5). עבר/הווה = אמת (מ-slots), עתיד = צפי.
 app.get('/api/examiner/matrix', authExaminer, (req, res) => {
   const running = currentRunningRound();
-  const roundsArr = db.prepare('SELECT round, state FROM rounds ORDER BY round').all();
-  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
-  const N = schedule.NUM_ROUNDS;
+  const roundsArr = db.prepare('SELECT round, state FROM day_rounds WHERE day_id = ? ORDER BY round').all(activeDayId());
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId());
+  const N = totalRounds();
 
   const list = examinees.map((ex) => {
     const setup = JSON.parse(ex.subjects || '[]').length > 0;
@@ -1028,6 +1460,93 @@ app.post('/api/examiner/override', authExaminer, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- בקשות החלפה מהמראיינים (המנהל מאשר) ----------
+app.get('/api/examiner/swap-requests', authExaminer, (req, res) => {
+  const rows = db.prepare(`SELECT s.*, i.name AS interviewer_name, i.room AS room, e.name AS examinee_name
+                           FROM interview_swap_requests s
+                           LEFT JOIN interviewers i ON i.id = s.interviewer_id
+                           LEFT JOIN examinees e ON e.code = s.code
+                           WHERE s.day_id = ? ORDER BY (s.status = 'pending') DESC, s.id DESC LIMIT 50`).all(activeDayId());
+  res.json({ requests: rows });
+});
+
+// אישור/דחייה. באישור אפשר לבצע את השינוי בפועל (סבב/מראיין חדשים).
+app.post('/api/examiner/decide-swap', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const reqRow = db.prepare('SELECT * FROM interview_swap_requests WHERE id = ? AND day_id = ?').get(Number(b.id), activeDayId());
+  if (!reqRow) return res.status(404).json({ error: 'בקשה לא נמצאה.' });
+  if (reqRow.status !== 'pending') return res.status(400).json({ error: 'הבקשה כבר טופלה.' });
+
+  if (b.approve) {
+    // אם המנהל ציין סבב/מראיין חדשים — מבצעים בפועל
+    const newRound = b.new_round ? Number(b.new_round) : null;
+    const newIv = b.new_interviewer_id !== undefined ? (b.new_interviewer_id ? Number(b.new_interviewer_id) : null) : undefined;
+    if (reqRow.code && (newRound || newIv !== undefined)) {
+      const targetRound = newRound || reqRow.round;
+      if (targetRound && newRound && newRound !== reqRow.round) {
+        if (roundState(newRound) !== 'planned') return res.status(400).json({ error: 'הסבב החדש כבר התחיל.' });
+        db.prepare('DELETE FROM interview_marks WHERE code = ? AND round = ?').run(reqRow.code, reqRow.round);
+        db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(newRound, reqRow.code);
+      }
+      if (newIv !== undefined && targetRound) {
+        db.prepare('UPDATE interview_marks SET interviewer_id = ? WHERE round = ? AND code = ?').run(newIv, targetRound, reqRow.code);
+      }
+    }
+  }
+  db.prepare('UPDATE interview_swap_requests SET status = ?, decided_at = ? WHERE id = ?')
+    .run(b.approve ? 'approved' : 'rejected', now(), reqRow.id);
+  res.json({ ok: true });
+});
+
+// ---------- תיקון פרק בלייב (רמה / נושא / מקצוע) בלי לאפס את הזמן ----------
+// לפעמים נבחן נכנס לפרק ברמה לא נכונה. הפעולות כאן מחליפות את תוכן המשבצת
+// ומשאירות את started_at/paused כמו שהם — כלומר הנבחן ממשיך עם הזמן שנשאר.
+app.post('/api/examiner/fix-slot', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const code = b.code;
+  const r = Number(b.round) || currentRunningRound();
+  const ex = getExamineeByCode.get(code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const slot = getSlot(code, r);
+  if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק פעיל לנבחן בסבב זה.' });
+
+  let next = null, newSubject = slot.subject, newLevel = slot.level;
+
+  if (b.action === 'lower_level') {
+    if (slot.subject !== 'מתמטיקה') return res.status(400).json({ error: 'הורדת רמה רלוונטית למתמטיקה בלבד.' });
+    const lower = schedule.lowerLevel(slot.level || '5');
+    if (String(lower) === String(slot.level)) return res.status(400).json({ error: 'הנבחן/ת כבר ברמה הנמוכה ביותר (3 יח״ל).' });
+    const served = servedChapterIds(code, r);
+    const pool = (content.bySubject.get('מתמטיקה') || []).filter((c) => String(c.level) === String(lower));
+    next = pool.find((c) => !served.has(c.chapter_id)) || pool[0] || null;
+    if (!next) return res.status(400).json({ error: 'אין פרק מתמטיקה זמין ברמה ' + lower + '.' });
+    newLevel = String(lower);
+    // מעדכנים גם את רמת המתמטיקה של הנבחן, כדי שהפרקים הבאים יהיו באותה רמה
+    db.prepare('UPDATE examinees SET math_level = ? WHERE code = ?').run(String(lower), code);
+  } else if (b.action === 'swap_variant') {
+    next = pickSwapChapter(code, slot, r);
+    if (!next) return res.status(400).json({ error: 'אין נושא חלופי זמין במקצוע הזה.' });
+  } else if (b.action === 'change_subject') {
+    const subject = String(b.subject || '').trim();
+    if (!subject) return res.status(400).json({ error: 'חסר מקצוע.' });
+    const served = servedChapterIds(code, r);
+    const level = subject === 'מתמטיקה' ? (b.level || ex.math_level || '5') : null;
+    const pool = (content.bySubject.get(subject) || []).filter((c) =>
+      subject !== 'מתמטיקה' || !level || String(c.level) === String(level));
+    next = pool.find((c) => !served.has(c.chapter_id)) || pool[0] || null;
+    if (!next) return res.status(400).json({ error: 'אין פרק זמין במקצוע ' + subject + '.' });
+    newSubject = subject; newLevel = next.level || null;
+  } else {
+    return res.status(400).json({ error: 'פעולה לא מוכרת.' });
+  }
+
+  // ⚠ במפורש לא נוגעים ב-started_at / paused / paused_accum_sec — הזמן ממשיך.
+  db.prepare('UPDATE slots SET subject = ?, level = ?, chapter_id = ?, variant_index = 0 WHERE code = ? AND round = ?')
+    .run(newSubject, newLevel, next.chapter_id, code, r);
+  logEvent(code, 'fix_slot', b.action + ' → ' + next.chapter_id + ' (סבב ' + r + ')');
+  res.json({ ok: true, subject: newSubject, level: newLevel, chapter_id: next.chapter_id });
+});
+
 // השהיה/המשך של כל הנבחנים בסבב הנוכחי בבת אחת
 app.post('/api/examiner/pause-all', authExaminer, (req, res) => {
   const pause = req.body && req.body.pause !== false; // ברירת מחדל: השהה
@@ -1064,7 +1583,7 @@ app.get('/api/examiner/exam-state', authExaminer, (req, res) => {
 
 // בונה מבנה ייצוא מלא (משמש גם לייצוא ידני וגם לגיבוי אוטומטי)
 function buildFullExport() {
-  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId());
   const out = examinees.map((ex) => {
     const slots = db.prepare('SELECT * FROM slots WHERE code = ? ORDER BY round').all(ex.code);
     const answers = db.prepare('SELECT * FROM answers WHERE code = ? ORDER BY round, item_id').all(ex.code);
@@ -1147,7 +1666,7 @@ app.get('/api/examiner/backup/:name', authExaminer, (req, res) => {
 
 // הורדת כל התשובות כקובץ אקסל (קריא, מוכן לבדיקה ידנית או לשליחה)
 app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
-  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId());
   const rows = [];
   for (const ex of examinees) {
     const answers = db.prepare('SELECT * FROM answers WHERE code = ? ORDER BY round, item_id').all(ex.code);
@@ -1194,7 +1713,7 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
 
 // ייצוא רשימת נבחנים + קודים אישיים + סבב ריאיון — "גיבוי מקורקע" שהמנהל מחזיק אצלו
 app.get('/api/examiner/export-roster', authExaminer, (req, res) => {
-  const examinees = db.prepare('SELECT * FROM examinees ORDER BY created_at').all();
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId());
   const rows = examinees.map((ex) => {
     const marks = db.prepare('SELECT round FROM interview_marks WHERE code = ? ORDER BY round').all(ex.code).map((r) => r.round);
     const subs = JSON.parse(ex.subjects || '[]');
@@ -1238,11 +1757,377 @@ app.get('/api/examiner/content-health', authExaminer, (req, res) => {
 });
 
 // ============================================================
+//  מערכת הבדיקה («מסך בדיקה») — נפרדת מהניהול החי
+// ============================================================
+const gradingJobs = {}; // cohort_id -> { total, done, failed, running }
+
+function gSafeParse(s, fallback) { try { return s ? JSON.parse(s) : fallback; } catch (e) { return fallback; } }
+function gIsMc(t) { return t === 'mc_apply' || t === 'mc_error_dialogue'; }
+function gIsTeach(t) { return t === 'text_teach' || t === 'text_teach_error'; }
+
+function cohortConfig(cohort) {
+  const w = gSafeParse(cohort && cohort.weights_json, null);
+  return (w && typeof w === 'object') ? Object.assign({}, score.CONFIG, w) : score.CONFIG;
+}
+function effectiveItemScores(gi) {
+  const human = gSafeParse(gi && gi.human_scores_json, null);
+  if (human && Object.keys(human).length) return human;
+  return gSafeParse(gi && gi.ai_scores_json, {}) || {};
+}
+function logGradeAudit(cohortId, code, chapterId, itemId, field, oldV, newV) {
+  db.prepare('INSERT INTO grading_audit (cohort_id,code,chapter_id,item_id,field,old,new,by,at) VALUES (?,?,?,?,?,?,?,?,?)')
+    .run(cohortId, code || null, chapterId || null, itemId || null, field, oldV == null ? null : String(oldV), newV == null ? null : String(newV), 'examiner', now());
+}
+
+// בונה את מבנה הפרקים לחישוב score.computeScores עבור נבחן במחזור
+function buildChaptersFor(cohortId, code) {
+  const answers = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? ORDER BY chapter_id,item_id').all(cohortId, code);
+  const items = db.prepare('SELECT * FROM grading_items WHERE cohort_id=? AND code=?').all(cohortId, code);
+  const itemMap = {};
+  items.forEach((gi) => { itemMap[gi.chapter_id + '|' + gi.item_id] = gi; });
+  const byChapter = {};
+  answers.forEach((a) => { (byChapter[a.chapter_id] = byChapter[a.chapter_id] || []).push(a); });
+  return Object.keys(byChapter).map((chId) => {
+    const ch = content.getChapter(chId);
+    const its = byChapter[chId].map((a) => {
+      if (gIsMc(a.type)) return { type: a.type, mcCorrect: a.correct === 1, dontKnow: !!a.dont_know };
+      if (gIsTeach(a.type)) return { type: a.type, dontKnow: !!a.dont_know, scores: effectiveItemScores(itemMap[chId + '|' + a.item_id]) };
+      return { type: a.type };
+    });
+    return { subject: ch ? ch.subject : null, level: ch ? ch.level : null, chapter_id: chId, items: its };
+  });
+}
+
+function computeAndStoreRollup(cohortId, code, cfg) {
+  const chapters = buildChaptersFor(cohortId, code);
+  const r = score.computeScores({ chapters: chapters }, cfg);
+  const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, code);
+  const rec = score.buildRecommendation(r, { mathLevel: gx && gx.math_level, mathWeak: false });
+  const dom = JSON.stringify(r.domainsLabeled || {});
+  const exists = db.prepare('SELECT 1 AS x FROM grading_rollups WHERE cohort_id=? AND code=?').get(cohortId, code);
+  if (exists) {
+    db.prepare('UPDATE grading_rollups SET domain_scores_json=?,content_c=?,teaching_t=?,final_1to5=?,breadth_bonus=?,top_domain=?,recommendation=? WHERE cohort_id=? AND code=?')
+      .run(dom, r.content, r.teaching, r.final, r.breadthBonus, r.topDomain, rec, cohortId, code);
+  } else {
+    db.prepare('INSERT INTO grading_rollups (cohort_id,code,domain_scores_json,content_c,teaching_t,final_1to5,breadth_bonus,top_domain,recommendation) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(cohortId, code, dom, r.content, r.teaching, r.final, r.breadthBonus, r.topDomain, rec);
+  }
+  return r;
+}
+function recomputeRanks(cohortId) {
+  const rows = db.prepare('SELECT code, final_1to5 FROM grading_rollups WHERE cohort_id=?').all(cohortId)
+    .filter((r) => r.final_1to5 != null)
+    .sort((a, b) => b.final_1to5 - a.final_1to5);
+  const n = rows.length;
+  const upd = db.prepare('UPDATE grading_rollups SET rank=?, percentile=? WHERE cohort_id=? AND code=?');
+  rows.forEach((r, i) => { upd.run(i + 1, n ? Math.round(((n - i) / n) * 100) : null, cohortId, r.code); });
+}
+function buildSheetRows(cohortId) {
+  return db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=?').all(cohortId).map((gx) => {
+    const roll = db.prepare('SELECT * FROM grading_rollups WHERE cohort_id=? AND code=?').get(cohortId, gx.code) || {};
+    return {
+      code: gx.code, name: gx.name, include: !!gx.include_in_sheet, locked: !!gx.locked, partial: !!gx.partial,
+      final: roll.final_1to5, teaching: roll.teaching_t, content: roll.content_c,
+      domains: gSafeParse(roll.domain_scores_json, {}), topDomain: roll.top_domain, rank: roll.rank, percentile: roll.percentile,
+      recommendation: roll.recommendation || '', note: gx.note || '',
+    };
+  }).sort((a, b) => (b.final || 0) - (a.final || 0));
+}
+
+// עבודת הרקע: בודקת פריטי «למד» שטרם נבדקו (resumable), 4 במקביל.
+async function runGradingJob(cohortId, items, cfg, job) {
+  const CONC = 4;
+  let idx = 0;
+  const affected = new Set();
+  async function worker() {
+    while (idx < items.length) {
+      const gi = items[idx++];
+      const a = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, gi.code, gi.chapter_id, gi.item_id);
+      const ch = content.getChapter(gi.chapter_id);
+      const item = ch && (ch.items || []).find((i) => i.id === gi.item_id);
+      const question = item ? (item.prompt || item.stem || '') : '';
+      const sourceText = ch && ch.source ? (ch.source.text || ch.source.tex || '') : '';
+      let r;
+      try {
+        r = await aiGrade.gradeTeachItem({ subject: ch ? ch.subject : '', sourceText: sourceText, question: question, answer: a ? a.answer : '', dontKnow: a ? !!a.dont_know : false }, cfg);
+      } catch (e) { r = { ok: false, criteria: {}, conclusion: 'שגיאה: ' + (e.message || ''), attention: '', confidence: 'low' }; }
+      db.prepare('UPDATE grading_items SET ai_scores_json=?, ai_conclusion=?, ai_attention=?, ai_confidence=?, ai_status=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?')
+        .run(JSON.stringify(r.criteria || {}), r.conclusion || '', r.attention || '', r.confidence || '', r.ok ? 'done' : 'failed', cohortId, gi.code, gi.chapter_id, gi.item_id);
+      affected.add(gi.code);
+      if (r.ok) job.done++; else job.failed++;
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < CONC; i++) workers.push(worker());
+  await Promise.all(workers);
+  const cfg2 = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
+  affected.forEach((code) => { try { computeAndStoreRollup(cohortId, code, cfg2); } catch (e) { /* לא לשבור */ } });
+  recomputeRanks(cohortId);
+  job.running = false;
+  job.finishedAt = now();
+}
+
+// צילום-מצב: מעתיק עותק קפוא מהמערכת החיה למחזור בדיקה חדש (idempotent לפי source_hash)
+app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim() || ('בדיקה ' + new Date().toLocaleDateString('he-IL'));
+  const withAns = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId())
+    .map((ex) => ({ ex: ex, ans: db.prepare('SELECT * FROM answers WHERE code=? ORDER BY chapter_id,item_id').all(ex.code) }))
+    .filter((o) => o.ans.length > 0);
+  if (!withAns.length) return res.status(400).json({ error: 'אין נבחנים עם תשובות לצילום.' });
+  const hashParts = withAns.map((o) => o.ex.code + ':' + o.ans.map((a) => a.item_id + '=' + (a.answer || '') + '#' + (a.updated_at || 0) + (a.dont_know ? 'd' : '')).join(','));
+  const sourceHash = crypto.createHash('sha256').update(hashParts.join('|')).digest('hex').slice(0, 16);
+  const existing = db.prepare('SELECT * FROM grading_cohorts WHERE source_hash=? ORDER BY id DESC').get(sourceHash);
+  if (existing) return res.json({ ok: true, cohort_id: existing.id, reused: true, name: existing.name });
+
+  const lockedNames = new Set(db.prepare('SELECT name FROM grading_examinees WHERE locked=1').all().map((r) => normName(r.name)));
+  const info = db.prepare('INSERT INTO grading_cohorts (name, created_at, source_hash, status, weights_json) VALUES (?,?,?,?,?)')
+    .run(name, now(), sourceHash, 'open', JSON.stringify(score.CONFIG));
+  const cohortId = Number(info.lastInsertRowid);
+
+  const insEx = db.prepare('INSERT INTO grading_examinees (cohort_id,code,name,subjects,math_level,declaration,include_in_sheet,partial) VALUES (?,?,?,?,?,?,?,?)');
+  const insAns = db.prepare('INSERT INTO grading_answers (cohort_id,code,chapter_id,item_id,type,answer,correct,dont_know) VALUES (?,?,?,?,?,?,?,?)');
+  const insItem = db.prepare('INSERT INTO grading_items (cohort_id,code,chapter_id,item_id,ai_status,status) VALUES (?,?,?,?,?,?)');
+  let teachCount = 0;
+  withAns.forEach((o) => {
+    const ex = o.ex;
+    const include = lockedNames.has(normName(ex.name)) ? 0 : 1;
+    insEx.run(cohortId, ex.code, ex.name, ex.subjects || '[]', ex.math_level || null, ex.declaration || null, include, ex.status === 'left' ? 1 : 0);
+    o.ans.forEach((a) => {
+      let correct = null;
+      if (gIsMc(a.type)) { const ok = content.isCorrectChoice(a.chapter_id, a.item_id, a.answer); correct = ok == null ? null : (ok ? 1 : 0); }
+      insAns.run(cohortId, ex.code, a.chapter_id, a.item_id, a.type, a.answer, correct, a.dont_know ? 1 : 0);
+      if (gIsTeach(a.type)) { insItem.run(cohortId, ex.code, a.chapter_id, a.item_id, 'pending', 'pending'); teachCount++; }
+    });
+  });
+  const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
+  withAns.forEach((o) => computeAndStoreRollup(cohortId, o.ex.code, cfg));
+  recomputeRanks(cohortId);
+  res.json({ ok: true, cohort_id: cohortId, name: name, examinees: withAns.length, teachItems: teachCount });
+});
+
+app.get('/api/examiner/grading/cohorts', authExaminer, (req, res) => {
+  const cohorts = db.prepare('SELECT * FROM grading_cohorts ORDER BY id DESC').all().map((c) => {
+    const exN = db.prepare('SELECT COUNT(*) AS n FROM grading_examinees WHERE cohort_id=?').get(c.id).n;
+    const tot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=?').get(c.id).n;
+    const done = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='done'").get(c.id).n;
+    const locked = db.prepare('SELECT COUNT(*) AS n FROM grading_examinees WHERE cohort_id=? AND locked=1').get(c.id).n;
+    const job = gradingJobs[c.id];
+    return { id: c.id, name: c.name, created_at: c.created_at, status: c.status, examinees: exN, teachItems: tot, aiDone: done, locked: locked, running: !!(job && job.running) };
+  });
+  res.json({ cohorts: cohorts, demo: !aiGrade.hasApiKey() });
+});
+
+app.get('/api/examiner/grading/cohort/:id', authExaminer, (req, res) => {
+  const id = Number(req.params.id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  const examinees = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? ORDER BY name').all(id).map((gx) => {
+    const roll = db.prepare('SELECT * FROM grading_rollups WHERE cohort_id=? AND code=?').get(id, gx.code) || {};
+    const tot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=?').get(id, gx.code).n;
+    const done = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND ai_status='done'").get(id, gx.code).n;
+    const reviewed = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND status IN ('approved','edited')").get(id, gx.code).n;
+    return { code: gx.code, name: gx.name, subjects: gSafeParse(gx.subjects, []), locked: !!gx.locked, include: !!gx.include_in_sheet, partial: !!gx.partial,
+      teachTotal: tot, aiDone: done, reviewed: reviewed, final: roll.final_1to5, teaching: roll.teaching_t, content: roll.content_c, topDomain: roll.top_domain, rank: roll.rank };
+  });
+  res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status, created_at: cohort.created_at }, examinees: examinees, demo: !aiGrade.hasApiKey(), job: gradingJobs[id] || null });
+});
+
+app.post('/api/examiner/grading/run-ai', authExaminer, (req, res) => {
+  const id = Number(req.body && req.body.cohort_id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  if (gradingJobs[id] && gradingJobs[id].running) return res.json({ ok: true, already: true, job: gradingJobs[id] });
+  const pending = db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status!='done'").all(id);
+  if (!pending.length) return res.json({ ok: true, nothing: true, total: 0 });
+  const job = { total: pending.length, done: 0, failed: 0, running: true, startedAt: now() };
+  gradingJobs[id] = job;
+  const cfg = aiGrade.loadConfig();
+  runGradingJob(id, pending, cfg, job).catch((e) => { job.running = false; job.error = String(e && e.message); });
+  res.json({ ok: true, started: true, total: pending.length, demo: !cfg.apiKey });
+});
+
+app.get('/api/examiner/grading/progress/:id', authExaminer, (req, res) => {
+  const id = Number(req.params.id);
+  const tot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=?').get(id).n;
+  const done = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='done'").get(id).n;
+  const failed = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='failed'").get(id).n;
+  const job = gradingJobs[id] || null;
+  res.json({ job: job, total: tot, done: done, failed: failed, running: !!(job && job.running) });
+});
+
+app.get('/api/examiner/grading/examinee/:cohort/:code', authExaminer, (req, res) => {
+  const cohortId = Number(req.params.cohort);
+  const code = req.params.code;
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId);
+  const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, code);
+  if (!cohort || !gx) return res.status(404).json({ error: 'לא נמצא.' });
+  const answers = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? ORDER BY chapter_id,item_id').all(cohortId, code);
+  const items = db.prepare('SELECT * FROM grading_items WHERE cohort_id=? AND code=?').all(cohortId, code);
+  const itemMap = {}; items.forEach((gi) => { itemMap[gi.chapter_id + '|' + gi.item_id] = gi; });
+  const byChapter = {}; answers.forEach((a) => { (byChapter[a.chapter_id] = byChapter[a.chapter_id] || []).push(a); });
+  const chapters = Object.keys(byChapter).map((chId) => {
+    const ch = content.getChapter(chId);
+    const its = byChapter[chId].map((a) => {
+      const item = ch && (ch.items || []).find((i) => i.id === a.item_id);
+      const base = { item_id: a.item_id, type: a.type, dont_know: !!a.dont_know, question: item ? (item.prompt || item.stem || '') : '' };
+      if (gIsMc(a.type)) {
+        let chosenText = a.answer;
+        let correctText = '';
+        if (item && item.options) {
+          const opt = item.options.find((o) => o.id === a.answer);
+          if (opt) chosenText = opt.text || opt.tex || a.answer;
+          const right = item.options.find((o) => o.correct);
+          if (right) correctText = right.text || right.tex || '';
+        }
+        base.mc = { chosen: chosenText, correct: a.correct === 1, correctText: correctText, dontKnow: !!a.dont_know };
+      } else if (gIsTeach(a.type)) {
+        const gi = itemMap[chId + '|' + a.item_id] || {};
+        base.teach = {
+          answer: a.answer || '',
+          ai: gSafeParse(gi.ai_scores_json, {}), aiConclusion: gi.ai_conclusion || '', aiAttention: gi.ai_attention || '', aiConfidence: gi.ai_confidence || '', aiStatus: gi.ai_status || 'pending',
+          human: gSafeParse(gi.human_scores_json, null), note: gi.human_note || '', status: gi.status || 'pending',
+        };
+      }
+      return base;
+    });
+    return { chapter_id: chId, subject: ch ? ch.subject : '', level: ch ? ch.level : '', source: ch && ch.source ? (ch.source.text || ch.source.tex || '') : '', items: its };
+  });
+  const cfg = cohortConfig(cohort);
+  const roll = computeAndStoreRollup(cohortId, code, cfg);
+  recomputeRanks(cohortId);
+  const order = db.prepare('SELECT code FROM grading_examinees WHERE cohort_id=? ORDER BY name').all(cohortId);
+  const pos = order.findIndex((o) => o.code === code);
+  res.json({
+    cohort: { id: cohort.id, name: cohort.name },
+    examinee: { code: gx.code, name: gx.name, subjects: gSafeParse(gx.subjects, []), math_level: gx.math_level, locked: !!gx.locked, include: !!gx.include_in_sheet, note: gx.note || '', partial: !!gx.partial },
+    chapters: chapters, rollup: roll,
+    criteria: score.CRITERION_LABEL, criteriaOrder: score.CRITERIA, axis: score.AXIS_OF,
+    nav: { prev: pos > 0 ? order[pos - 1].code : null, next: pos < order.length - 1 ? order[pos + 1].code : null, index: pos + 1, count: order.length },
+    demo: !aiGrade.hasApiKey(),
+  });
+});
+
+app.post('/api/examiner/grading/item', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const cohortId = Number(b.cohort_id);
+  const gi = db.prepare('SELECT * FROM grading_items WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, b.code, b.chapter_id, b.item_id);
+  if (!gi) return res.status(404).json({ error: 'פריט לא נמצא.' });
+  let humanJson = gi.human_scores_json;   // שומרים על מצב העריכה הקיים — לא מעתיקים ציוני AI סתם לתוך "ציון אנושי"
+  let changed = false;
+  if (b.scores && typeof b.scores === 'object') {
+    const human = gSafeParse(gi.human_scores_json, null) || gSafeParse(gi.ai_scores_json, {}) || {};
+    Object.keys(b.scores).forEach((k) => {
+      const v = Math.max(1, Math.min(5, Math.round(Number(b.scores[k]))));
+      if (isFinite(v) && human[k] !== v) { logGradeAudit(cohortId, b.code, b.chapter_id, b.item_id, k, human[k], v); human[k] = v; changed = true; }
+    });
+    if (changed) humanJson = JSON.stringify(human);
+  }
+  const note = (b.note != null) ? String(b.note).slice(0, 1000) : gi.human_note;
+  const wasEdited = !!humanJson;
+  let status = gi.status;
+  if (b.approve === true) status = 'approved';                                   // נעילת השאלה (גם אם נערכה)
+  else if (b.approve === false) status = wasEdited ? 'edited' : 'pending';        // פתיחת השאלה מחדש
+  else if (wasEdited) status = 'edited';
+  db.prepare('UPDATE grading_items SET human_scores_json=?, human_note=?, status=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?')
+    .run(humanJson, note, status, cohortId, b.code, b.chapter_id, b.item_id);
+  const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
+  const roll = computeAndStoreRollup(cohortId, b.code, cfg);
+  recomputeRanks(cohortId);
+  res.json({ ok: true, rollup: roll, status: status });
+});
+
+app.post('/api/examiner/grading/lock', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const cohortId = Number(b.cohort_id);
+  const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, b.code);
+  if (!gx) return res.status(404).json({ error: 'לא נמצא.' });
+  const locked = b.locked ? 1 : 0;
+  if (locked) db.prepare("UPDATE grading_items SET status='approved' WHERE cohort_id=? AND code=? AND status='pending'").run(cohortId, b.code);
+  db.prepare('UPDATE grading_examinees SET locked=?, reviewer=? WHERE cohort_id=? AND code=?').run(locked, 'examiner', cohortId, b.code);
+  logGradeAudit(cohortId, b.code, null, null, 'locked', gx.locked, locked);
+  const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
+  const roll = computeAndStoreRollup(cohortId, b.code, cfg);
+  recomputeRanks(cohortId);
+  res.json({ ok: true, locked: !!locked, rollup: roll });
+});
+
+app.post('/api/examiner/grading/examinee-flags', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const cohortId = Number(b.cohort_id);
+  const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, b.code);
+  if (!gx) return res.status(404).json({ error: 'לא נמצא.' });
+  const include = (b.include != null) ? (b.include ? 1 : 0) : gx.include_in_sheet;
+  const note = (b.note != null) ? String(b.note).slice(0, 2000) : gx.note;
+  db.prepare('UPDATE grading_examinees SET include_in_sheet=?, note=? WHERE cohort_id=? AND code=?').run(include, note, cohortId, b.code);
+  res.json({ ok: true });
+});
+
+app.post('/api/examiner/grading/recompute', authExaminer, (req, res) => {
+  const cohortId = Number(req.body && req.body.cohort_id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId);
+  if (!cohort) return res.status(404).json({ error: 'לא נמצא.' });
+  const cfg = cohortConfig(cohort);
+  db.prepare('SELECT code FROM grading_examinees WHERE cohort_id=?').all(cohortId).forEach((r) => { try { computeAndStoreRollup(cohortId, r.code, cfg); } catch (e) { /* דלג */ } });
+  recomputeRanks(cohortId);
+  res.json({ ok: true });
+});
+
+app.get('/api/examiner/grading/sheet/:id', authExaminer, (req, res) => {
+  const id = Number(req.params.id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status }, rows: buildSheetRows(id) });
+});
+
+app.get('/api/examiner/grading/export-sheet/:id', authExaminer, (req, res) => {
+  const id = Number(req.params.id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  const all = req.query.all === '1';
+  const rows = buildSheetRows(id).filter((r) => all || r.include);
+  const out = rows.map((r) => ({
+    'שם': r.name,
+    'ציון סופי': r.final != null ? r.final : '',
+    'הוראה': r.teaching != null ? r.teaching : '',
+    'תוכן': r.content != null ? r.content : '',
+    'כמותי': r.domains['כמותי'] != null ? r.domains['כמותי'] : '',
+    'מילולי': r.domains['מילולי'] != null ? r.domains['מילולי'] : '',
+    'אנגלית': r.domains['אנגלית'] != null ? r.domains['אנגלית'] : '',
+    'תחום מוביל': r.topDomain || '',
+    'דירוג': r.rank || '',
+    'אחוזון': r.percentile != null ? r.percentile : '',
+    'המלצה': r.recommendation || '',
+    'הערות בודק': r.note || '',
+    'מבחן חלקי': r.partial ? 'כן' : '',
+    'מחזור': cohort.name,
+  }));
+  const header = ['שם', 'ציון סופי', 'הוראה', 'תוכן', 'כמותי', 'מילולי', 'אנגלית', 'תחום מוביל', 'דירוג', 'אחוזון', 'המלצה', 'הערות בודק', 'מבחן חלקי', 'מחזור'];
+  const ws = XLSX.utils.json_to_sheet(out, { header: header });
+  ws['!views'] = [{ RTL: true }];
+  ws['!cols'] = [{ wch: 18 }, { wch: 9 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 7 }, { wch: 8 }, { wch: 42 }, { wch: 24 }, { wch: 10 }, { wch: 18 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ציונים');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', 'attachment; filename="grades-' + id + '.xlsx"');
+  res.send(buf);
+});
+
+app.post('/api/examiner/grading/delete-cohort', authExaminer, (req, res) => {
+  const id = Number(req.body && req.body.cohort_id);
+  if (!id) return res.status(400).json({ error: 'חסר מזהה.' });
+  ['grading_rollups', 'grading_items', 'grading_answers', 'grading_examinees', 'grading_audit'].forEach((t) => db.prepare('DELETE FROM ' + t + ' WHERE cohort_id=?').run(id));
+  db.prepare('DELETE FROM grading_cohorts WHERE id=?').run(id);
+  delete gradingJobs[id];
+  res.json({ ok: true });
+});
+
+// ============================================================
 //  קבצים סטטיים
 // ============================================================
 // מונעים מהדפדפן לשמור גרסה ישנה של הקוד (HTML/JS/CSS) — כך עדכון תמיד נכנס לתוקף מיד.
 app.use(function (req, res, next) {
-  if (/\.(html|js|css)$/i.test(req.path) || req.path === '/' || req.path === '/examiner') {
+  if (/\.(html|js|css)$/i.test(req.path) || req.path === '/' || req.path === '/examiner' || req.path === '/grade' || req.path === '/interviewer') {
     res.setHeader('Cache-Control', 'no-store, must-revalidate');
   }
   next();
@@ -1251,6 +2136,8 @@ app.use('/vendor/katex', express.static(path.join(__dirname, 'node_modules', 'ka
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/examiner', (req, res) => res.sendFile(path.join(__dirname, 'public', 'examiner.html')));
+app.get('/grade', (req, res) => res.sendFile(path.join(__dirname, 'public', 'grade.html')));
+app.get('/interviewer', (req, res) => res.sendFile(path.join(__dirname, 'public', 'interviewer.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // בדיקת בריאות (ל-Render)
