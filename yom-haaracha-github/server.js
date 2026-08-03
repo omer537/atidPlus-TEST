@@ -1593,10 +1593,15 @@ app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
   // בונים לוח תפוסה (סבב → אילו מראיינים תפוסים) מהשיבוצים הקיימים.
   const ivs = db.prepare('SELECT id FROM interviewers WHERE day_id = ? AND active = 1 ORDER BY id').all(activeDayId()).map((v) => v.id);
   const taken = {};   // round -> Set(interviewer_id)
+  const load = {};    // interviewer_id -> כמה ריאיונות כבר יש לו (לחלוקה מאוזנת)
+  ivs.forEach((id) => { load[id] = 0; });
   plannedRounds.forEach((rd) => { taken[rd] = new Set(); });
   db.prepare(`SELECT m.round, m.interviewer_id FROM interview_marks m JOIN examinees e ON e.code = m.code
               WHERE e.day_id = ? AND m.interviewer_id IS NOT NULL`).all(activeDayId())
-    .forEach((m) => { if (taken[m.round]) taken[m.round].add(m.interviewer_id); });
+    .forEach((m) => {
+      if (taken[m.round]) taken[m.round].add(m.interviewer_id);
+      load[m.interviewer_id] = (load[m.interviewer_id] || 0) + 1;
+    });
 
   let assigned = 0, withInterviewer = 0;
   const unassigned = [];
@@ -1610,10 +1615,15 @@ app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
     if (bestRound == null) break;
     db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(bestRound, ex.code);
     assigned++;
-    const freeIv = ivs.find((id) => !taken[bestRound].has(id));
+    // מבין הפנויים בסבב — בוחרים את זה שיש לו הכי מעט ריאיונות, כדי לחלק בהוגנות
+    // (אחרת המראיין הראשון היה מקבל את כולם והשאר אפס).
+    const freeIv = ivs
+      .filter((id) => !taken[bestRound].has(id))
+      .sort((a, b) => (load[a] || 0) - (load[b] || 0))[0];
     if (freeIv) {
       db.prepare('UPDATE interview_marks SET interviewer_id = ? WHERE round = ? AND code = ?').run(freeIv, bestRound, ex.code);
       taken[bestRound].add(freeIv);
+      load[freeIv] = (load[freeIv] || 0) + 1;
       withInterviewer++;
     } else {
       unassigned.push(ex.code);   // אין מראיין פנוי — שובץ לסבב בלי מראיין

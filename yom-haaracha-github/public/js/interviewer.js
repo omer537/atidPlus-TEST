@@ -45,7 +45,10 @@ window.InterviewerApp = (function () {
     root.appendChild(el(
       '<div class="card" style="max-width:420px;width:100%">' + BRAND +
       '<h2>כניסת מראיין/ת</h2>' +
-      (dayInfo && dayInfo.title ? '<div class="iv-day-tag">אתם נכנסים ל: <b>' + esc(dayInfo.title) + '</b></div>' : '') +
+      (dayInfo && dayInfo.title
+        ? '<div class="iv-day-tag">אתם נכנסים ליום הפעיל: <b>' + esc(dayInfo.title) + '</b>' +
+          '<div style="font-size:11px;margin-top:2px;opacity:.75">אין מה לבחור — המסך מציג תמיד את היום שמתנהל כרגע</div></div>'
+        : '') +
       '<p class="lead">בחרו את שמכם והזינו את סיסמת המראיינים.</p>' +
       (errMsg ? '<div class="msg error">' + esc(errMsg) + '</div>' : '') +
       (list.length ? '' : '<div class="msg warn">עדיין לא הוגדרו מראיינים ליום הזה. המנהל צריך להוסיף מראיינים וחדרים.</div>') +

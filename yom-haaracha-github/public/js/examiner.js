@@ -69,6 +69,7 @@ window.AdminApp = (function () {
       '<button class="btn ghost small" id="btn-export" title="גיבוי JSON לבדיקת AI">JSON</button>' +
       '<button class="btn small" id="btn-grade" title="בדיקה, ציונים ודירוג (אחרי יום המבחן)">מסך בדיקה</button>' +
       '<button class="btn ghost small" id="btn-logout">יציאה</button></div>' +
+      '<div id="render-err"></div>' +
       '<div id="ended-banner"></div>' +
       // הקמת יום הערכה: בחירת יום, כותרת, מספר סבבים, שלב היום
       '<div class="card"><div id="day-setup"></div></div>' +
@@ -168,6 +169,9 @@ window.AdminApp = (function () {
     renderAddSubjects();
   }
 
+  // ברירת המחדל של הודעת מסך הסיום — זהה ל-DEFAULT_FINISH_MSG בשרת
+  var DEFAULT_FINISH = 'המבחן הסתיים — תודה רבה! נא לעבור למשבצת הבאה לפי ההנחיות של הצוות.';
+
   // הודעת אישור צפה — כדי שתמיד יהיה ברור שהפעולה נשמרה
   function toast(msg, kind) {
     var t = document.getElementById('exm-toast');
@@ -262,33 +266,46 @@ window.AdminApp = (function () {
         ? '<div class="msg info" style="margin-top:10px"><b>הנבחנים רואים כרגע:</b> «' + esc(day.finish_message || 'המבחן הסתיים — תודה רבה! נא לעבור למשבצת הבאה לפי ההנחיות של הצוות.') + '»</div>'
         : '') +
 
-      // ── עריכת פרטי היום ──
+      // ── הגדרות היום: מופרד ל«קבוע» מול «ניתן לשינוי תמיד» ──
+      '<div class="settings-block">' +
+      '<div class="sb-head"><b>מבנה היום</b>' +
+      (started ? '<span class="sb-lock">נעול — המבחן התחיל</span>' : '<span class="sb-open">ניתן לשינוי עד תחילת הסבב הראשון</span>') + '</div>' +
       '<div class="day-grid">' +
-      '<label class="field" style="margin:0"><span>שם היום (לשימוש שלך)</span><input id="day-name" type="text" value="' + esc(day.name) + '"></label>' +
-      '<label class="field" style="margin:0"><span>כותרת לנבחן (בדף הכניסה)</span><input id="day-title" type="text" value="' + esc(day.title || '') + '"></label>' +
       '<label class="field" style="margin:0"><span>מספר סבבים</span>' +
       (started
-        ? '<input type="text" value="' + n + ' סבבים" disabled title="נקבע בהקמת היום">'
+        ? '<input type="text" value="' + n + ' סבבים" disabled>'
         : (function () {
             var o = '';
             for (var k = DAYS.min_rounds; k <= DAYS.max_rounds; k++) o += '<option value="' + k + '"' + (k === n ? ' selected' : '') + '>' + k + ' סבבים</option>';
             return '<select id="day-rounds">' + o + '</select>';
           })()) +
       '</label>' +
+      '<div class="field" style="margin:0"><span>מה זה אומר</span>' +
+      '<div class="sb-note" id="rounds-explain">' + n + ' סבבים = <b>' + subjCount + ' ' + (subjCount === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + «מידע כללי» + ריאיון</div></div>' +
       '</div>' +
-      '<label class="field" style="margin-top:6px"><span>הודעה שהנבחן יראה במסך הסיום</span>' +
-      '<textarea id="day-finish" style="min-height:52px">' + esc(day.finish_message || '') + '</textarea></label>' +
-      '<div class="btn-row" style="margin-top:-2px"><button class="btn small" id="btn-save-details">שמור פרטי יום</button>' +
-      '<span class="hint-text" style="margin:0;align-self:center">שומר שם, כותרת, מספר סבבים והודעת הסיום</span></div>' +
-      '<p class="hint-text" id="rounds-explain">' +
-      (started
-        ? '<b>מספר הסבבים נקבע בהקמת היום</b> ולא ניתן לשנותו אחרי שהמבחן התחיל (כדי לא לשבש נבחנים באמצע). לשיבוץ נבחן בודד לסבב שרץ — «כרטיס» → «קדם לפעילות הבאה».'
-        : n + ' סבבים = <b>' + subjCount + ' ' + (subjCount === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. אפשר לשנות עד שיתחיל הסבב הראשון.') +
-      '</p><div id="day-msg"></div>';
+      (started ? '<p class="hint-text" style="margin:6px 0 0">כדי לשבץ נבחן בודד לסבב שרץ: «כרטיס» → «קדם לפעילות הבאה».</p>' : '') +
+      '</div>' +
 
-    document.getElementById('btn-new-day').onclick = openDayModal;
-    document.getElementById('btn-days-list').onclick = openDaysList;
-    document.getElementById('btn-save-day').onclick = function () { saveDay(); };
+      '<div class="settings-block">' +
+      '<div class="sb-head"><b>טקסטים</b><span class="sb-open">ניתן לשינוי בכל עת, גם בזמן המבחן</span></div>' +
+      '<div class="day-grid">' +
+      '<label class="field" style="margin:0"><span>שם היום (לשימוש שלך)</span><input id="day-name" type="text" value="' + esc(day.name) + '"></label>' +
+      '<label class="field" style="margin:0"><span>כותרת לנבחן (בדף הכניסה)</span><input id="day-title" type="text" value="' + esc(day.title || '') + '"></label>' +
+      '</div>' +
+      '<label class="field" style="margin-top:8px"><span>הודעה שהנבחן יראה במסך הסיום' +
+      (ended ? ' <b style="color:var(--ok)">— מוצגת כרגע לנבחנים</b>' : '') + '</span>' +
+      '<textarea id="day-finish" style="min-height:52px" placeholder="' + esc(DEFAULT_FINISH) + '">' + esc(day.finish_message || '') + '</textarea></label>' +
+      '<p class="hint-text" style="margin:4px 0 0">אם משאירים ריק, יוצג: «' + esc(DEFAULT_FINISH) + '»</p>' +
+      '<div class="btn-row" style="margin-top:8px"><button class="btn small" id="btn-save-details">שמור הגדרות</button>' +
+      '<span class="hint-text" style="margin:0;align-self:center">שומר את כל השדות למעלה</span></div>' +
+      '</div><div id="day-msg"></div>';
+
+    // ⚠ כל חיווט חייב הגנת null — כפתורים קיימים רק במצבים מסוימים,
+    // ושגיאה כאן עוצרת את כל הרינדור (טבלת נבחנים/קונסולה) בשקט.
+    var nd = document.getElementById('btn-new-day');
+    if (nd) nd.onclick = openDayModal;
+    var dl = document.getElementById('btn-days-list');
+    if (dl) dl.onclick = openDaysList;
     var og = document.getElementById('btn-open-exam');
     if (og) og.onclick = function () {
       if (!confirm('להתחיל את המבחן?\n\nהנבחנים שנרשמו יעברו למסך ההוראות, ההצהרה ובחירת המקצועות.')) return;
@@ -314,7 +331,8 @@ window.AdminApp = (function () {
     var dr = document.getElementById('day-rounds');
     if (dr) dr.onchange = function () {
       var v = Number(this.value), sc = Math.max(1, v - 2);
-      document.getElementById('rounds-explain').innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. <span style="color:var(--warn)">לחצו «שמור שינויים».</span>';
+      var ex2 = document.getElementById('rounds-explain');
+      if (ex2) ex2.innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + «מידע כללי» + ריאיון<br><span style="color:var(--warn)">לחצו «שמור הגדרות» כדי להחיל.</span>';
     };
   }
   function fmtDay(ms) { try { return new Date(ms).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
@@ -1392,11 +1410,28 @@ window.AdminApp = (function () {
     try { STATE = await call('/examiner/status'); } catch (e) { if (e.status === 401) return renderLogin('פג תוקף. התחבר/י מחדש.'); return; }
     var M = null;
     if (!matrixHidden) { try { M = await call('/examiner/matrix'); } catch (e) { /* אל תשבור את הרענון */ } }
-    try {
-      renderDaySetup(); renderReadiness(STATE); renderSwaps(STATE);
-      renderConsole(STATE); renderPlanBoard(STATE); renderMatrix(M); renderRoster(STATE); renderExamState();
-      if (window.__openCardCode) renderCard(window.__openCardCode);
-    } catch (e) { /* לא לשבור את הלולאה בגלל שגיאת רינדור */ }
+    // ⚠ כל חלק מצטייר בנפרד: כשל באחד לא מפיל את השאר (זה מה שהסתיר באג
+    // שבו טבלת הנבחנים לא הוצגה בכלל). שגיאה מדווחת ולא נבלעת בשקט.
+    var broke = [];
+    function part(name, fn) {
+      try { fn(); } catch (e) { broke.push(name); console.error('שגיאת רינדור ב-' + name + ':', e); }
+    }
+    part('שער היום', function () { renderDaySetup(); });
+    part('פס מוכנות', function () { renderReadiness(STATE); });
+    part('בקשות החלפה', function () { renderSwaps(STATE); });
+    part('קונסולת סבב', function () { renderConsole(STATE); });
+    part('לוח תכנון', function () { renderPlanBoard(STATE); });
+    part('מטריצה', function () { renderMatrix(M); });
+    part('טבלת נבחנים', function () { renderRoster(STATE); });
+    part('מצב מבחן', function () { renderExamState(); });
+    if (window.__openCardCode) part('כרטיס נבחן', function () { renderCard(window.__openCardCode); });
+    var errBox = document.getElementById('render-err');
+    if (errBox) {
+      errBox.innerHTML = broke.length
+        ? '<div class="msg error">תקלת תצוגה ב: ' + esc(broke.join(', ')) +
+          '. הנתונים שמורים — נסו לרענן (Cmd+Shift+R). אם זה חוזר, צרו צילום מסך.</div>'
+        : '';
+    }
   }
   async function start() {
     try { availableSubjects = (await call('/subjects')).subjects || []; } catch (e) { availableSubjects = []; }
