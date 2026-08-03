@@ -1,83 +1,95 @@
-# פרויקט «יום הערכה» — הקשר לכל שיחה
+# פרויקט «בחינת סיווג / יום הערכה» — הקשר לכל שיחה
 
-מערכת ווב בעברית (RTL) לניהול יום הערכה למלגאים: ~40–50 נבחנים במקביל, כל אחד **4 פרקי מבחן + ריאיון אחד** פרוסים על **5 סבבים**. **4 הפרקים = 3 מקצועות שהנבחן בוחר + פרק «מידע כללי» חובה** (פענוח חומר חדש והסברתו לתלמיד — `GENERAL_SUBJECT` ב-`lib/schedule.js`). המקור המחייב: `בריף-בנייה-קלוד-קוד.md` (בתיקיית ההורה `~/Desktop/מבחנים ליום הערכה/`). **המשתמש אינו מתכנת — להסביר בעברית פשוטה.**
+מערכת ווב בעברית (RTL) להרצת יום הערכה למלגאים ולבדיקתו אחר כך.
+**המשתמש אינו מתכנת — להסביר בעברית פשוטה, בלי מונחים טכניים.**
+
+## מבנה היום (המודל העסקי)
+- **ימי הערכה מרובים** — כל יום נשמר בנפרד ולא מתערבב. תמיד יש «יום פעיל» אחד שמנהלים.
+- **מספר סבבים גמיש 3–5**, נקבע בהקמת היום ו**נעול מרגע שהתחיל הסבב הראשון**.
+- לכל נבחן: **(סבבים−2) מקצועות שהוא בוחר + פרק «מידע כללי» חובה + ריאיון אישי**.
+  5 סבבים→3 מקצועות · 4→2 · 3→1. תנאי בסיס: `MIN_ROUNDS=3`.
+- **מראיין = חדר קבוע.** מראיין אחד מראיין **נבחן אחד בסבב** (נאכף). נגזרת: נדרשים `⌈נבחנים ÷ סבבים⌉` מראיינים — יש אזהרת קיבולת בפס המוכנות.
+- **שני שלבי יום**: `registration` (הרשמת בוקר — הנבחן רואה רק «נרשמת בהצלחה», והמנהל משבץ ריאיונות/מראיינים/חדרים) ⇄ `open` (ההוראות, ההצהרה ובחירת המקצועות נפתחים).
 
 ## איך מריצים
-- התיקייה: `~/Desktop/מבחנים ליום הערכה/app`. סטאק: **Node + Express + `node:sqlite` מובנה** (בלי DB חיצוני), פרונט vanilla JS (בלי build).
-- הרצה: דאבל-קליק על `הפעל שרת.command` (עוצר שרת קודם ואז `npm start`), או `node server.js`. פורט **3000**.
-- מסך נבחן: `http://localhost:3000`. מסך מנהל: כפתור "כניסת מנהל" בפינה או `/examiner` (סיסמה: env `EXAMINER_PASSWORD`, ברירת מחדל `admin`).
-- רשת מקומית: נבחנים מתחברים ל-`http://<IP-של-המחשב>:3000` (אותו Wi-Fi) — פתרון מומלץ ליום במקום אחד.
-- Node 24+ נדרש ל-`node:sqlite` בלי flag (`.node-version=24`, `engines>=24`).
+- תיקייה: `~/Desktop/מבחנים ליום הערכה/app`. סטאק: **Node 24+ + Express + `node:sqlite` מובנה**, פרונט vanilla JS (בלי build). פורט **3000**.
+- הרצה: `EXAMINER_PASSWORD=admin node server.js` (או דאבל-קליק על `הפעל שרת.command`). לעצור קודם: `lsof -tiTCP:3000 -sTCP:LISTEN | xargs kill`.
+- **ארבעה מסכים**: נבחן `/` · מנהל `/examiner` · **מראיין `/interviewer`** · **בדיקה וציונים `/grade`**.
+- סיסמאות: `EXAMINER_PASSWORD` (מנהל+בדיקה), `INTERVIEWER_PASSWORD` (מראיינים, ברירת מחדל `interview`).
+- בדיקת תוכן: `npm run check-content`. סימולציית יום מלא: ראו «בדיקות» למטה.
 
-## ארכיטקטורה (app/)
-- `server.js` — כל הלוגיקה וה-API. `db.js` — סכימה + מיגרציות (ALTER בtry/catch). `lib/schedule.js` (chapterListFor/nextChapter/pickInterviewRound), `lib/content.js` (טעינת בנק), `lib/guardrail.js` (שומר סף + `npm run check-content`), `lib/grade.js` (בדיקת AI).
-- `content/*.json` — 8 פרקי זרעים (מתמטיקה5, אנגלית, לשון, היסטוריה, רובוטיקה, מדעים-חטיבה, פיזיקה, ביולוגיה). `public/` — index.html (נבחן), examiner.html, css/style.css, js/{app.js, examiner.js, render.js}, img/logo.svg. KaTeX מוגש מ-`node_modules/katex/dist` ב-`/vendor/katex` (לא CDN).
-- `scripts/rehearsal.js` (`npm run rehearsal`, env `N=`, `BASE=`), `scripts/build_guide.py` (בונה `public/guide.pdf` מ-README; דורש venv עם reportlab+python-bidi).
+## ארכיטקטורה
+- `server.js` — כל ה-API. `db.js` — סכימה + מיגרציות.
+- `lib/`: `schedule.js` (chapterListFor/nextChapter/resolveActivity helpers), `content.js` (בנק התוכן), `guardrail.js` (שומר סף), **`score.js`** (מנוע ניקוד 1–5), **`aiGrade.js`** (בדיקת «למד» ע"י Claude), **`nameMatch.js`** (התאמת שמות עברית לבריפים), `grade.js` (CLI ישן).
+- `public/`: `index.html`+`js/app.js` (נבחן), `examiner.html`+`js/examiner.js` (מנהל), `interviewer.html`+`js/interviewer.js`, `grade.html`+`js/grade.js`, `css/style.css`, `js/render.js` (KaTeX + טוקן שבר עברי).
+- `content/*.json` — **34 פרקים, 10 מקצועות** (8 רגילים ×3 וריאנטים; מתמטיקה 5/4/3 = 9; «יזמות גירלס פלוס» ×1; «מידע כללי» ×3).
 
-## המנוע — «מודל סבב חי» (הליבה, אל תחזור למודל הקבוע!)
-- לכל סבב 1..5 יש `rounds.state ∈ {planned, running, ended}`. סבב אחד רץ בכל רגע; מתקדמים 1→5.
-- **הריאיונות נקבעים ידנית, הפרקים אוטומטית** (החלטת המשתמש). טבלה `interview_marks(round, code)` = מי בריאיון בכל סבב.
-- **התחל סבב** (`/api/examiner/start-round`): לכל נבחן `active` נבנית שורת `slots(code,round)` חיה דרך `resolveActivity(ex,round)` — אם מסומן לריאיון ולא התראיין→interview, אחרת→`nextChapter` (הפרק הבא שטרם עשה מרשימת `chapterListForEx`), אחרת idle (בלי slot). **אין בניית slots מראש** ברישום.
-- **סיים סבב** (`end-round`): interview→`examinees.interviewed=1`; כל השורות→`done`; state=ended. **אפס סבב** (`reset-round`, רק לסבב הפעיל/אחרון): מוחק slots של הסבב, מבטל interviewed למי שהריאיון היה בו, state=planned (תשובות נשמרות). גיבוי אוטומטי לפני כל פעולה הרסנית (`makeBackup`).
-- דגלי מפתח על `examinees`: `interviewed` (דגל, לא נגזר מ-slots!), `in_interview` (כרגע בריאיון → הטיימר מושהה), `status ∈ {registered, active, left}`. `hasInterviewed` קורא את הדגל.
-- **תשובות** (`answers`) ממופתחות `(code, chapter_id, item_id)` — לא לפי סבב, כך שאיפוס/הגשה-מחדש שומרים אותן.
-- **זהות לפי שם (לא קוד!):** `examinees.code` הוא מזהה פנימי קבוע ונסתר (נוצר ב-`genCode`), משמש ככל מפתחות ההצטרפות. הזהות המחייבת היא **השם** (ייחודי, מנורמל דרך `normName` = trim+כיווץ רווחים; חיפוש דרך `findByName`). ה«קוד האישי» שהנבחן מקליד נשמר ב-`examinees.pin` והוא **לא ייחודי** — כל אחד בוחר חופשי; משמש רק לחזרה (שם+קוד). `pin` ריק = נבחן שנפתח לפי שם בלבד ומאמץ את הקוד הראשון שיקליד. `/login` מחזיר 200(restore)/404(שם לא קיים→נבחן חדש)/409(שם תפוס+קוד שגוי, הודעה בדף ההתחברות). המנהל עורך שם+קוד דרך `edit-examinee` (לא נוגע ב-code הפנימי → אין cascade). `add-examinee`/bulk: קוד אופציונלי.
+## המנוע — «מודל סבב חי» (הליבה, אל תחזור למודל קבוע!)
+- `day_rounds(day_id, round)` עם `state ∈ {planned, running, ended}`. סבב אחד רץ בכל רגע.
+- **הריאיונות ידניים, הפרקים אוטומטית.** `interview_marks(round, code, interviewer_id)`.
+- **`start-round`**: לכל נבחן `status != 'left'` (כולל `registered`!) נבנית `slots(code,round)` דרך `resolveActivity`. **מסומן לריאיון → משבצת ריאיון גם בלי מקצועות** (ריאיון אינו זקוק להם). רשת ביטחון: אם השלב עדיין `registration` — עובר ל-`open` אוטומטית.
+- **`complete-setup`**: אם סבב **כבר רץ** ולנבחן אין משבצת — משבץ אותו **מיד** (אחרת היה תקוע סבב שלם).
+- **`end-round`**: interview→`interviewed=1`; כל השורות→`done`; state=ended.
+- **`reset-round`** (רק לסבב האחרון): מוחק slots, מבטל interviewed, חוזר ל-planned. תשובות נשמרות.
+- דגלים על `examinees`: `interviewed`, `in_interview` (טיימר מושהה), `status ∈ {registered, active, left}`, `day_id`, `interview_brief`, `self_registered`.
+- **תשובות** ממופתחות `(code, chapter_id, item_id)` — לא לפי סבב, כך שאיפוס/הגשה-מחדש שומרים אותן.
+- **זהות לפי שם**: `examinees.code` = מזהה פנימי נסתר (join key). השם ייחודי (`normName`/`findByName`). ה«קוד האישי» ב-`pin` — **לא ייחודי**, לשחזור בלבד.
+- **טיימר server-authoritative** (`slots.started_at/duration_sec/paused_accum_sec`), 20 דק' כברירת מחדל.
 
-## API עיקרי (מנהל, כולם authExaminer)
-- מחזור סבב: `start-round`, `end-round`, `reset-round`, `reset-all-current`, `full-reset` (מוחק slots+answers, שומר נבחנים+תכנון), `pause-all`, `end-exam`+`exam-state`.
-- תכנון: `mark-interview{code,round,on}` (רק סבב planned; ריאיון פעם אחת — מסיר סימון מסבבים planned אחרים; מתריע אם כבר התראיין), `set-interview-plan{text}` (הדבקת `קוד/שם,סבב`), `autosplit-interviews` (חלוקה שווה לסבבים פתוחים).
-- טיפול פרטני: `advance-examinee{code}` (משבץ נבחן לסבב הרץ אם אין לו slot — למאחרים), `interview-out`/`interview-return` (השהיה/חידוש טיימר + interviewed=1 בחזרה), `reopen-submit`, `set-left{code,left}`, `override{action: add_time|pause|resume|reset_slot|start|finish}`, `remove-examinee`.
-- נבחנים: `add-examinee`, `add-examinees-bulk` (`שם,קוד[,סבב]`), `status` (מחזיר running, rounds[], וכל נבחן עם setup/interviewed/in_interview/left/current/timer/chapters_done/remaining_chapters/marked_rounds/needs_interview/finished).
-- ייצוא/גיבוי: `export-excel` (xlsx קריא), `export-all` (JSON ל-AI), `backups`/`backup-now`/`backup/:name` (גיבוי אוטו' כל 5 דק' ל-`data/backups`, גם בשרת). נבחן: `/api/{register,login,complete-setup,state,save-answer,submit-slot,swap-question,not-comfortable,event}`, ציבורי `/api/subjects`.
+## סוף היום ובדיקה
+- **מחזור חיים במסך המנהל (3 שלבים ממוספרים)**: `1 התחל מבחן → 2 סיים מבחן → 3 סגור יום ושלח לבדיקה`.
+- **`save-day`**: גיבוי → סיום סבב פעיל → `exam_ended` ליום → **צילום ראשי לבדיקה** (`is_primary`+`day_id`) → `days.status='closed'`.
+- **יום סגור חוסם נבחנים** (הרשמה 403, מחוברים → מסך סיום).
+- **הודעת מסך הסיום** (`days.finish_message`) — המנהל עורך אותה, מתעדכנת בלייב.
+- **צילום = עותק קפוא ונפרד** בטבלאות `grading_*`. **שורד מחיקת היום החי.** `createSnapshot(name,{primary})`.
+- **מסך `/grade`**: צילום → «הרץ בדיקת AI» (רקע, resumable) → עמוד ביקורת לכל נבחן (אמריקאיות ✓/✗ אוטומטי; «למד» עם 4 קריטריונים 1–5, מסקנת AI, «על מה לשים לב») → «אשר ונעל» → גיליון ציונים → **Excel ל-monday**.
+- **מודל הניקוד** (`lib/score.js`, הכול 1–5): 3 תחומים (כמותי/מילולי/אנגלית, רק מה שנבחר) · שני צירים תוכן+הוראה · **סופי = 0.6·הוראה + 0.4·תוכן** · תוכן = **שיא + פרס-רוחב מוגבל** (`τ=3.0` סף, `Δ=0.5` תקרה) כך שמצוין-באחד ≈ טוב-בשניים ולא נעקף, ובינוני לא מקבל פרס · **שער דיוק**: תוכן שגוי חותך את תרומת ההוראה.
+- 4 קריטריוני «למד»: `accuracy`,`depth` [תוכן] · `diagnosis_fit`,`clarity` [הוראה].
+- בדיקת AI דורשת `ANTHROPIC_API_KEY`; בלי מפתח → **מצב הדגמה** עם באנר.
 
-## מצבי מסך הנבחן (`buildExamineeState`, phase)
-`ended` → `needs_setup` (אין subjects) → `in_interview` → (אין סבב רץ: `finished`/`waiting`) → לפי slot: `interview`/`submitted`(done)/`chapter`. הלקוח (app.js) עושה polling כל 5 שניות, טיימר server-authoritative, שמירה אוטומטית debounced, חסימת הדבקה + דיווח blur/tabhide, כפתור "הגש פרק", שם+"יציאה".
-
-## מסך המנהל (examiner.js — window.AdminApp, משובץ גם ב-index דרך "כניסת מנהל")
-- **קונסולת סבב**: רצועת 5 סבבים + "התחל/סיים/בטל-אפס סבב" + שתי רשימות חיות "בריאיון"/"בפרק".
-- **לוח תכנון** (5 עמודות = מי בריאיון בכל סבב) + "חלק לקבוצות".
-- **טבלת נבחנים**: כפתורי סבב-ריאיון 1–5 לכל נבחן (סבב שהתחיל נעול), סטטוס "עשה/נותר/התראיין", "עכשיו"+טיימר, טריאז' (שורות דורשות-טיפול קופצות למעלה ומסומנות), כפתור **"כרטיס"**.
-- **כרטיס נבחן (מודאל)**: ציר מסלול + פעולות פרטניות (קדם לפעילות הבאה · שלח/חזר מריאיון · +2 דק' · אפס משבצת · פתח הגשה מחדש · סמן עזב · הסר).
-- ניהול נבחנים (יחיד/רשימה/תכנון), גיבוי ושחזור, פעולות כלליות (סיים מבחן / אפס יום מלא), Excel/JSON/תקינות.
+## בריפים למראיינים
+- כל מראיין רואה בריף קצר על כל מי שהוא מראיין.
+- הזנה: **הדבקה** (`set-briefs-bulk`, שורה לכל נבחן, פיצול על **התו הראשון בלבד** טאב→`|`→פסיק כך שפסיקים בתוך הבריף נשמרים) + **פרומפט מוכן להעתקה** לקלוד עם האקסל של המשתמש.
+- **התאמת שמות** (`lib/nameMatch.js`): מדויק → משייך; מקורב (גרשיים/אות סופית/שם אמצעי/מרחק עריכה ≤2) → **מציע בלבד**. לא-נמצא → `pending_briefs`.
+- **מסך «בקרת בריפים»**: ספירות, אזור שיוך עם ההצעה הטובה מסומנת מראש + סיבה + ביטחון, טבלת כולם עם עריכה inline.
 
 ## עיצוב ומיתוג (מחייב)
-- ערכה כהה «הייטקיסטית» בצבעי **עתיד פלוס**: נייבי `#1e2a5e`, ירוק `#45b84e`, טורקיז `#23b3a4`. RTL מלא, בלי אימוג'י (למעט ✓/⚑ קיימים). לוגו: `public/img/logo.svg` — סמל 3 משושים ששוחזר; **המשתמש יכול להחליף ל-PNG הרשמי ב-`public/img/`**.
-- KaTeX עם קווי שבר אמיתיים; `.katex{direction:ltr;unicode-bidi:isolate}` (תיקון RTL); שבר עברי דרך טוקן `[[frac:מונה|מכנה]]` ב-render.js (לא Hebrew בתוך `\text` של KaTeX).
+ערכה כהה בצבעי **עתיד פלוס**: נייבי `#1e2a5e`, ירוק `#45b84e`, טורקיז `#23b3a4`. RTL מלא, בלי אימוג'י (למעט ✓/⚑). הכיתוב ליד הלוגו במסך הנבחן: **«בחינת סיווג»**. KaTeX עם `.katex{direction:ltr;unicode-bidi:isolate}`; שבר עברי בטוקן `[[frac:מונה|מכנה]]`.
 
 ## פריסה (Render)
-- הקוד הוא git repo ב-`app/`. תיקיית העלאה נקייה ב-`~/Desktop/yom-haaracha-github` (נבנית מ-`git archive HEAD`). המשתמש מעלה דרך אתר GitHub (Upload files, גורר את כל התוכן).
-- Render: **New → Web Service** (אין Blueprint בתפריט), חיבור למאגר. **Build:** `npm install`, **Start:** `npm start`. אם הקבצים בתת-תיקייה במאגר → **Settings → Root Directory** = שם התיקייה. Env: `EXAMINER_PASSWORD`, `DB_PATH=/var/data/assessment.db`. תוכנית Starter (לא Free) + **Disk** ב-`/var/data` לגיבוי קבוע. `render.yaml` קיים.
+- git repo ב-`app/`. תיקיית העלאה נקייה ב-`~/Desktop/yom-haaracha-github` (`git archive HEAD`). המשתמש מעלה דרך אתר GitHub (Upload files).
+- Render: Web Service · Build `npm install` · Start `npm start` · Disk ב-`/var/data` · Env: `EXAMINER_PASSWORD`, `DB_PATH=/var/data/assessment.db`, `INTERVIEWER_PASSWORD`, ואופציונלי `ANTHROPIC_API_KEY`, `SHEETS_WEBHOOK_URL`.
+- חי: **https://atidplus-test.onrender.com** · סיסמת מנהל `bbb123`.
 
-## לקחים/מלכודות (אל תחזור עליהן)
-- **סטטיים עם `Cache-Control: no-store`** (server.js) — כדי שעדכונים ייכנסו לתוקף מיד. אחרי deploy: רענון קשיח (Cmd+Shift+R).
-- **שרת כפול**: להריץ רק instance אחד על 3000 (הלאנצ'ר עוצר קודם). שני שרתים = נתונים ישנים/בלבול.
-- **באג closure שתוקן**: handlers של כפתורי קונסולה חייבים לקרוא מ-`this`/data-attr, לא ממשתנה משותף.
-- בדיקת שפיות מהירה: `node -c <file>.js`.
-- **נבחן שבחר <3 מקצועות → הראשי ממלא** (01/08/2026): `chapterListFor` נותן לכל חזרה של מקצוע **וריאנט אחר** (עד גודל הפול). `resolveActivity` + סטטוס/מטריצה + `allChaptersDone` עברו ל**ספירה פר-מקצוע** (כמה פרקים נעשו/שובצו) במקום "נעשה/לא" — עמיד גם לחזרות וגם ל"החלף שאלה". `servedSubjects`/`doneSubjects` כבר לא בשימוש (נשארו כהגדרות מתות). המקרה הנפוץ (3 מקצועות שונים) לא השתנה — נבדק rehearsal 18/18.
+## מלכודות — אל תחזור עליהן
+- **ALTER חייב לרוץ *אחרי* יצירת הטבלה.** ב-`db.js` יש **שתי** לולאות ALTER: הראשונה (~103) לטבלאות הבסיס, והשנייה (~274) ל-`days`/`grading_cohorts` שנוצרות אחריה. ALTER על טבלה שלא קיימת **נכשל בשקט** ב-try/catch והעמודה לא נוספת.
+- **`onclick = fn` מעביר את אירוע הלחיצה כארגומנט הראשון.** אם לפונקציה יש פרמטר משמעותי — לעטוף: `onclick = function(){ fn(); }`. (זה שבר את שמירת מספר הסבבים.)
+- **כל פעולה לפי מספר סבב חייבת סינון יום** — `DAY_SCOPE` (` AND code IN (SELECT code FROM examinees WHERE day_id = ?)`), אחרת נוגעים בנבחנים של ימים אחרים. גם `full-reset` מוגבל ליום.
+- **מצב הנבחן נקרא מהיום *שלו*** (`dayOfExaminee`), לא מהיום הפעיל — המנהל יכול להחליף יום בזמן שנבחן מחובר.
+- **סטטיים עם `Cache-Control: no-store`** + `?v=N` ב-HTML. אחרי deploy: רענון קשיח.
+- **שרת אחד בלבד** על 3000.
+- בדיקת שפיות: `node -c <file>.js`.
+- **תוסיף שדה חדש ל-`/status`?** המסך לא יראה אותו עד שיישלח (זה קרה עם `exam_ended`).
 
-## סטטוס נוכחי (עדכן אחרי כל סבב!)
-**הושלם ונבדק (rehearsal 18/18, אימות ויזואלי):** מנוע סבב-חי מלא; קונסולת מנהל; לוח תכנון 5 עמודות + כרטיס נבחן לטיפול פרטני (קידום אישי, ריאיון-כאירוע-אישי עם השהיית טיימר, טריאז'); גיבוי אוטומטי; Excel/JSON; מדריך `guide.pdf`. הקוד commited ב-git; תיקיית ההעלאה מעודכנת.
+## בדיקות (בתיקיית scratchpad של הסשן)
+- `simday.js` — סימולציית יום מלא. `ROUNDS=5 N=12 node simday.js` (וגם 4 ו-3). מקציב `⌈N/ROUNDS⌉` מראיינים.
+- `fixes_test.js` — 24 טענות: שער המבחן, חפיפות מראיינים, קיבולת, ימים.
+- `round3_test.js` — בריפים (שמות מעוותים), `exam_ended` פר-יום, `save-day`, שרידות הצילום.
+- `round4_test.js` — בחירת מקצועות בזמן סבב, חסימת יום סגור, ארכיון + חוברת רב-גיליונות.
+- כולן: להריץ שרת על DB זמני (`DB_PATH=/tmp/x.db EXAMINER_PASSWORD=demo123 node server.js`) ואז `node <test>.js`.
 
-**נוסף לאחרונה (נבדק):**
-- **מטריצה מלאה** (`/api/examiner/matrix` + `renderMatrix` ב-examiner.js): נבחן×5 סבבים. עבר/הווה מ-slots, עתיד = צפי מלא (ריאיונות מסומנים + פרקים נותרים לפי הסדר; ריאיון-צפי כשנגמרים הפרקים). תא→כרטיס נבחן. CSS ב-`.matrix`/`.mx`.
-- **שלב ביטחון (עמידות רשת)** ב-app.js: כל תשובה נכנסת ל-`App.outbox` (נשמר ב-localStorage `yh_outbox`) → `flushOutbox` עם retry (`scheduleRetry` 3ש') + על online/poll. מחוון `#net-status` (offline/pending/ok). `onSubmit` מרוקן תור לפני הגשה. `renderChapter` מעדיף ערך מקומי ממתין. מתאפס ב-logout.
-- **גוגל שיטס לייב**: `pushToSheet` (fire-and-forget, כבוי אם `SHEETS_WEBHOOK_URL`/`sheetsWebhookUrl` ריק). `pushChapterAnswers(examinee, slot)` דוחף את **התשובות המלאות** של פרק (שאלה·תשובה מפוענחת·לא יודע/ת·נכון) — נורה ב-`submit-slot`, וב-`end-round` עבור chapter slots שלא הוגשו (בלי כפילויות). הגדרה: `docs/google-sheets-setup.md` (env `SHEETS_WEBHOOK_URL` ב-Render). נבדק מול מוק מקומי + rehearsal.
-- **בנק תוכן (34 פרקים, 10 מקצועות)** ב-`content/` — 8 מקצועות "רגילים" × 3 וריאנטים (מתמטיקה 5/4/3 = 9) + «יזמות גירלס פלוס» (1) + «מידע כללי» (3). 8 פרקי הזרע הוסרו. מתמטיקה ב-KaTeX (`tex`/`\(...\)`), שבר עברי בטוקן `[[frac:...|...]]`. עבר `check-content` (0 שגיאות) + rehearsal 18/18 ל-N=30 ו-N=50, ובדיקת מקביליות אמיתית (30 בקשות בו-זמנית, 62ms).
-- **"החלף שאלה" תוקן** (`swap-question` + `pickSwapChapter`): מושך פרק אחר מאותו מקצוע/רמה שהנבחן טרם עשה, ומעדכן `slot.chapter_id`. **מעקב "נעשה" עבר מ-chapter_id ל-מקצוע** (`servedSubjects`/`doneSubjects` ב-`resolveActivity`/status/matrix) — כך מקצוע שהוחלף לא חוזר בסבב מאוחר. (`not-comfortable` לא-מתמטיקה משתמש באותו pool; ענף המתמטיקה נשאר — מוריד רמה לפרק מתמטיקה עתידי אם קיים.)
-- **rehearsal עודכן** למודל הזהות החדש: משתמש ב-`internalCode` (מ-`state.examinee.code`) לפעולות מנהל, וב-`code` (pin) להתחברות.
+## סטטוס (04/08/2026) — עדכן אחרי כל סבב!
+**הכול בנוי ונבדק. הקוד committed ב-`main` (אחרון `f8e7f5d`), ותיקיית ההעלאה מעודכנת.**
 
-**נוסף בסבב האחרון (01/08/2026 — נבדק מקומית, טרם עלה ל-Render):**
-- **פרק «מידע כללי» (חובה לכולם)**: הנבחן בוחר **3 מקצועות (לא 4)**, והפרק הרביעי הוא תמיד «מידע כללי» — decode→teach ברמת חטיבה (חומר חדש מוסבר במלואו בקטע, הנבחן מפענח ומסביר לתלמיד). מנגנון: `buildChapterSubjects` ב-`lib/schedule.js` (קבועים `NUM_CHOSEN=3`, `GENERAL_SUBJECT='מידע כללי'`). תוכן: `content/general_{sunk_cost,rule72,framing}_01.json`. מוסתר מבחירת המקצועות (`/api/subjects` מסנן אותו).
-- **מקצוע «יזמות גירלס פלוס»** (בנות בלבד — תווית בלבד, אין שדה מגדר): `content/entrepreneurship_girls_plus_01.json`, וריאנט יחיד, 10 שאלות פתוחות (text_teach) מה-PDF. אזהרת check-content "אין mc" — צפויה ותקינה.
-- **כפתור «לא יודע/ת»** (מחליף את מקום «לא בנוח» שהוסר): מסמן פריט + ממשיך לשאלה הבאה. שמירה עמידה דרך ה-outbox (`save-answer` + דגל `dont_know`, עמודה חדשה ב-`answers`). מוצג ב-export (Excel+JSON) ובכרטיס. UI: `.act-dontknow`/`.dk-marked`/`.dk-badge`.
-- **מסך הוראות** חדש אחרי הכניסה (view `instructions` ב-app.js): login→instructions→declaration→subjects→exam.
-- **שאלון הצהרה מחודש**: רשימה קבועה של 12 מקצועות (`DECL_SUBJECTS` ב-app.js) — **דיווח עצמי בלבד, נפרד מבחירת המבחן** — + רמת מתמטיקה + **שדה הערות אחד** (במקום הערה פר-מקצוע). מבנה אחסון: `{subjects, mathLevel, note}` ב-`examinees.declaration`. מוצג בכרטיס הבוחן וב-roster/JSON.
-- **סבב תוספות שני**: (א) פירוט ידע-מוקדם פר-מקצוע במסך ההוראות. (ב) גיליון גוגל שיטס עם **התשובות המלאות** (ראו שורת "גוגל שיטס לייב" למטה) — הכרעת המשתמש: נקי, בהגשת פרק (+ השלמה ב-end-round).
+**נשאר למשתמש:** להעלות את תוכן `~/Desktop/yom-haaracha-github` ל-GitHub (Render יתעדכן לבד), ולהגדיר `INTERVIEWER_PASSWORD` ב-Render.
 
-**הבא בתור (backlog):**
-1. **בדיקת AI «שילוב» (AI מציע, אדם מאשר)** — `lib/grade.js` קיים כ-CLI בלבד (batch, ממוצע/מרוכב/דירוג/אחוזון, demo בלי מפתח). חסר: מסך מנהל להרצה+הצגת הצעות+אישור/עריכה+שמירת ציון סופי.
-2. **תוכן «מידע כללי» סופי**: כרגע 3 קטעים טיוטתיים (sunk cost / כלל 72 / מסגור). המשתמש עשוי להחליף לטקסט משלו.
-3. **פענוח לא בנוח הישן**: `/api/not-comfortable` נשאר כקוד מת בשרת (הכפתור הוסר). אפשר לנקות אם רוצים.
+**נדחה במכוון (אחרי יום ההערכה הבא):**
+1. **«בקש החלפה» מובנה** — כרגע המראיין שולח בקשה בטקסט חופשי והמנהל מאשר. מתוכנן: `swap-options` שמחזיר רק אפשרויות חוקיות (סבב `planned`, מראיין פנוי, שמירת «ריאיון אחד לכל נבחן») + אימות-מחדש בעת האישור.
+2. **העלאת קובץ Excel אמיתי לבריפים** (כרגע הדבקה).
+3. **השלמת מסך הבדיקה** — עובד מקצה-לקצה במצב הדגמה; לא נבדק עם מפתח API אמיתי על תשובות אמיתיות.
+4. תוכן «מידע כללי» סופי (3 קטעים טיוטתיים מאושרים); ניקוי `/api/not-comfortable` המת.
+
+**תוצרים על ה-Desktop:** `מדריך-הפעלה.pdf` (הפעלת היום), `מדריך-בדיקה-וציונים.pdf` (חיבור מפתח API + מחזור בדיקה), `מסכי יום הערכה.pdf`, `מבחני גיבוי PDF/` (34 מבחנים להדפסה).
 
 ## תהליך העבודה עם המשתמש
-נותן רשימות תיקונים; לעבור סעיף-סעיף, לשאול על הלא-ברור (AskUserQuestion) לפני בנייה גדולה, לאמת ב-preview לפני מסירה. מעריך UI מגניב + מיתוג עתיד פלוס. mockups (visualize) לפני בנייה גדולה עוזרים לו להחליט.
+נותן רשימות תיקונים ממוספרות — לעבור סעיף-סעיף ולענות על כל אחד. לשאול (AskUserQuestion) לפני בנייה גדולה. **הוא מגלה באגים אמיתיים בבדיקה שלו — לקחת ברצינות ולאמת בקוד לפני שמתקנים.** לאמת בדפדפן לפני מסירה. מעריך UI מגניב + מיתוג עתיד פלוס.

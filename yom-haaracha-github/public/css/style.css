@@ -480,6 +480,27 @@ tr.gr-locked td { background: rgba(69,184,78,0.05); }
 .iv-day-chip { font-size: 12px; font-weight: 700; background: rgba(35,179,164,0.14); color: #9ff0e4;
   border: 1px solid var(--teal); border-radius: 999px; padding: 3px 12px; margin-inline-start: 4px; }
 
+/* ------- מחזור החיים של היום (1→2→3) ------- */
+.lifecycle { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.lc-step { flex: 1; min-width: 210px; display: flex; gap: 10px; align-items: flex-start;
+  border: 1px dashed var(--border); border-radius: 12px; padding: 11px 13px; opacity: 0.55; }
+.lc-step.now { opacity: 1; border-style: solid; border-color: var(--teal); background: rgba(35,179,164,0.07); }
+.lc-step.done { opacity: 1; border-style: solid; border-color: rgba(69,184,78,0.4); background: rgba(69,184,78,0.05); }
+.lc-num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,0.07);
+  color: var(--muted); font-weight: 800; font-size: 13px; display: flex; align-items: center; justify-content: center; }
+.lc-step.now .lc-num { background: var(--teal); color: #04231f; }
+.lc-step.done .lc-num { background: var(--ok); color: #04220a; }
+.lc-body { flex: 1; min-width: 0; }
+.lc-body b { display: block; font-size: 14px; color: #fff; }
+.lc-body small { display: block; font-size: 11.5px; color: var(--muted); line-height: 1.5; margin: 2px 0 7px; }
+.lc-tag { font-size: 12px; font-weight: 700; color: #7ee08a; }
+.dc-chip.ended { background: rgba(251,92,107,0.14); color: #ff9ba4; border-color: var(--danger); }
+
+/* ------- ארכיון ימים סגורים ------- */
+.arch-list { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+.arch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  border: 1px solid var(--border); border-radius: 10px; padding: 9px 13px; }
+
 /* ------- סוף היום + מה נשמר ------- */
 .day-gate.end { border-style: solid; border-color: rgba(69,184,78,0.35); background: rgba(69,184,78,0.05); }
 .saves-card { border-color: var(--warn) !important; background: rgba(247,183,49,0.05) !important; }

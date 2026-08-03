@@ -132,12 +132,15 @@ window.AdminApp = (function () {
       '<div class="btn-row"><button class="btn small" id="btn-backup-now">גבה עכשיו</button></div>' +
       '<div id="backup-list" class="health-list" style="margin-top:12px"></div></div>' +
       // אזור מסוכן
-      '<div class="card"><h2 class="section-title">פעולות כלליות</h2>' +
-      '<div class="btn-row"><button class="btn danger small" id="btn-end-exam">סיים את המבחן (לכולם)</button>' +
-      '<button class="btn ghost small" id="btn-full-reset">אפס יום מלא (לחזרה גנרלית)</button>' +
+      '<div class="card"><div class="toolbar"><h2 class="section-title">פעולות איפוס</h2><span class="spacer"></span>' +
+      '<button class="btn ghost small" id="btn-danger-toggle">הצג</button></div>' +
+      '<p class="hint-text">פעולות מוחקות — מוסתרות כברירת מחדל כדי שלא ילחצו עליהן בטעות. ' +
+      'לסיום רגיל של היום השתמשו ב<b>«סיים מבחן»</b> ו<b>«סגור יום ושלח לבדיקה»</b> למעלה.</p>' +
+      '<div id="danger-zone" style="display:none">' +
+      '<div class="btn-row"><button class="btn ghost small" id="btn-full-reset">אפס יום מלא (לחזרה גנרלית)</button>' +
       '<button class="btn danger small" id="btn-remove-all">הסר את כל הנבחנים</button></div>' +
       '<p class="hint-text">"סיים את המבחן" מעביר את כל הנבחנים למסך סיום. "אפס יום מלא" מוחק את כל ההתקדמות והתשובות ומתחיל מאפס — שומר את רשימת הנבחנים והתכנון. <b>"הסר את כל הנבחנים"</b> מוחק לגמרי את כל הנבחנים והתשובות (משאיר רק את תכנון הסבבים). להשתמש רק לפני היום או אחרי חזרה גנרלית. לפני כל פעולה נוצר גיבוי אוטומטי.</p>' +
-      '<div id="health"></div></div>' +
+      '<div id="health"></div></div></div>' +
       '</div>'
     ));
     document.getElementById('btn-logout').onclick = function () { localStorage.removeItem('yh_examiner_token'); token = null; if (pollHandle) clearInterval(pollHandle); leave(); };
@@ -150,7 +153,13 @@ window.AdminApp = (function () {
     document.getElementById('add-one').onclick = addOne;
     document.getElementById('add-bulk').onclick = addBulk;
     document.getElementById('plan-load').onclick = loadPlan;
-    document.getElementById('btn-end-exam').onclick = endExam;
+    var dt = document.getElementById('btn-danger-toggle');
+    if (dt) dt.onclick = function () {
+      var z = document.getElementById('danger-zone');
+      var open = z.style.display !== 'none';
+      z.style.display = open ? 'none' : 'block';
+      this.textContent = open ? 'הצג' : 'הסתר';
+    };
     document.getElementById('btn-full-reset').onclick = fullReset;
     document.getElementById('btn-remove-all').onclick = removeAllExaminees;
     document.getElementById('btn-autosplit').onclick = autosplit;
@@ -201,9 +210,13 @@ window.AdminApp = (function () {
     var subjCount = S.subject_count || Math.max(1, n - 2);
     var started = (S.rounds || []).some(function (r) { return r.state !== 'planned'; });
     var meta = DAYS.days.filter(function (d) { return d.id === day.id; })[0] || {};
-    var phaseChip = phase === 'open'
-      ? '<span class="dc-chip open">המבחן פתוח</span>'
-      : '<span class="dc-chip reg">הרשמה בלבד</span>';
+    var closed = (meta.status || day.status) === 'closed';
+    var ended = !!day.exam_ended;
+    var phaseChip = closed
+      ? '<span class="dc-chip closed">יום סגור · בארכיון</span>'
+      : (ended ? '<span class="dc-chip ended">המבחן הסתיים</span>'
+        : (phase === 'open' ? '<span class="dc-chip open">המבחן פתוח</span>'
+          : '<span class="dc-chip reg">הרשמה בלבד</span>'));
 
     box.innerHTML =
       // ── שורת השליטה ──
@@ -221,25 +234,32 @@ window.AdminApp = (function () {
       '<button class="btn small" id="btn-new-day">+ הקם יום</button>' +
       '</div></div>' +
 
-      // ── שער המבחן ──
-      '<div class="day-gate">' +
-      (phase === 'registration'
-        ? '<div class="dg-text"><b>הנבחנים בשלב הרשמה.</b> הם נרשמים ורואים רק «נרשמת בהצלחה» — בלי הצהרה ובלי מקצועות. זה הזמן לשבץ ריאיונות, מראיינים וחדרים.</div>' +
-          '<button class="btn big" id="btn-open-exam">התחל מבחן ▶</button>'
-        : '<div class="dg-text"><b>המבחן פתוח.</b> הנבחנים רואים את ההוראות, ההצהרה ובחירת המקצועות. אחרי שכולם בחרו — «התחל סבב 1» למטה.</div>' +
-          '<button class="btn ghost small" id="btn-close-reg">חזור לשלב הרשמה</button>') +
+      // ── מחזור החיים של היום: התחל → סיים → סגור ──
+      '<div class="lifecycle">' +
+      '<div class="lc-step ' + (closed ? 'done' : (phase === 'open' ? 'done' : 'now')) + '">' +
+      '<div class="lc-num">1</div><div class="lc-body"><b>התחל מבחן</b>' +
+      '<small>נפתחים לנבחנים ההוראות, ההצהרה ובחירת המקצועות</small>' +
+      (closed ? '' : (phase === 'registration'
+        ? '<button class="btn big" id="btn-open-exam">התחל מבחן ▶</button>'
+        : '<span class="lc-tag">בוצע ✓</span> <button class="btn ghost small" id="btn-close-reg">חזור לשלב הרשמה</button>')) +
+      '</div></div>' +
+      '<div class="lc-step ' + (closed ? 'done' : (ended ? 'done' : (phase === 'open' ? 'now' : ''))) + '">' +
+      '<div class="lc-num">2</div><div class="lc-body"><b>סיים מבחן</b>' +
+      '<small>כל הנבחנים עוברים למסך הסיום עם ההודעה שלמטה</small>' +
+      (closed ? '' : (ended
+        ? '<span class="lc-tag">בוצע ✓</span> <button class="btn ghost small" id="btn-reopen-exam">החזר לפעילות</button>'
+        : (phase === 'open' ? '<button class="btn" id="btn-end-exam-top">סיים מבחן</button>' : ''))) +
+      '</div></div>' +
+      '<div class="lc-step ' + (closed ? 'done' : (ended ? 'now' : '')) + '">' +
+      '<div class="lc-num">3</div><div class="lc-body"><b>סגור יום ושלח לבדיקה</b>' +
+      '<small>יוצר את הצילום הראשי לבדיקה וסוגר את היום לארכיון</small>' +
+      (closed
+        ? '<span class="lc-tag">בוצע ✓ — היום בארכיון</span>'
+        : (phase === 'open' ? '<button class="btn" id="btn-save-day">סגור יום ושלח לבדיקה ✓</button>' : '')) +
+      '</div></div>' +
       '</div>' +
-      // ── סוף היום ──
-      (phase === 'open'
-        ? '<div class="day-gate end">' +
-          '<div class="dg-text"><b>סוף היום.</b> «סיים מבחן» מעביר את כולם למסך הסיום עם ההודעה שלמטה. ' +
-          '«שמור יום» מסיים, יוצר את <b>הצילום הראשי לבדיקה</b> וסוגר את היום לארכיון.</div>' +
-          '<button class="btn ghost small" id="btn-end-exam-top">סיים מבחן</button>' +
-          '<button class="btn" id="btn-save-day">שמור יום ✓</button>' +
-          '</div>' +
-          '<label class="field" style="margin-top:10px"><span>הודעה שהנבחן יראה במסך הסיום (ניתן לשנות גם בזמן היום)</span>' +
-          '<textarea id="day-finish" style="min-height:56px">' + esc(day.finish_message || '') + '</textarea></label>' +
-          '<div class="btn-row" style="margin-top:-4px"><button class="btn ghost small" id="btn-save-finish">שמור הודעה</button></div>'
+      (ended && !closed
+        ? '<div class="msg info" style="margin-top:10px"><b>הנבחנים רואים כרגע:</b> «' + esc(day.finish_message || 'המבחן הסתיים — תודה רבה! נא לעבור למשבצת הבאה לפי ההנחיות של הצוות.') + '»</div>'
         : '') +
 
       // ── עריכת פרטי היום ──
@@ -255,8 +275,11 @@ window.AdminApp = (function () {
             return '<select id="day-rounds">' + o + '</select>';
           })()) +
       '</label>' +
-      '<div style="display:flex;align-items:flex-end"><button class="btn small" id="btn-save-day">שמור שינויים</button></div>' +
       '</div>' +
+      '<label class="field" style="margin-top:6px"><span>הודעה שהנבחן יראה במסך הסיום</span>' +
+      '<textarea id="day-finish" style="min-height:52px">' + esc(day.finish_message || '') + '</textarea></label>' +
+      '<div class="btn-row" style="margin-top:-2px"><button class="btn small" id="btn-save-details">שמור פרטי יום</button>' +
+      '<span class="hint-text" style="margin:0;align-self:center">שומר שם, כותרת, מספר סבבים והודעת הסיום</span></div>' +
       '<p class="hint-text" id="rounds-explain">' +
       (started
         ? '<b>מספר הסבבים נקבע בהקמת היום</b> ולא ניתן לשנותו אחרי שהמבחן התחיל (כדי לא לשבש נבחנים באמצע). לשיבוץ נבחן בודד לסבב שרץ — «כרטיס» → «קדם לפעילות הבאה».'
@@ -278,14 +301,16 @@ window.AdminApp = (function () {
     };
     var eb = document.getElementById('btn-end-exam-top');
     if (eb) eb.onclick = endExam;
+    var rb = document.getElementById('btn-reopen-exam');
+    if (rb) rb.onclick = async function () {
+      if (!confirm('להחזיר את הנבחנים לפעילות? הם יצאו ממסך הסיום.')) return;
+      try { await call('/examiner/end-exam', 'POST', { ended: false }); await refresh(); renderDaySaves(); toast('הוחזר לפעילות'); }
+      catch (e) { alert(e.message); }
+    };
     var sd = document.getElementById('btn-save-day');
     if (sd) sd.onclick = saveDayFinal;
-    var sf = document.getElementById('btn-save-finish');
-    if (sf) sf.onclick = function () {
-      var t = document.getElementById('day-finish');
-      saveDay({ finish_message: t ? t.value : '' });
-      toast('הודעת הסיום נשמרה — הנבחנים יראו אותה מיד');
-    };
+    var sdet = document.getElementById('btn-save-details');
+    if (sdet) sdet.onclick = function () { saveDay(); };
     var dr = document.getElementById('day-rounds');
     if (dr) dr.onchange = function () {
       var v = Number(this.value), sc = Math.max(1, v - 2);
@@ -334,6 +359,7 @@ window.AdminApp = (function () {
     try { d = await call('/examiner/day-saves'); } catch (e) { box.innerHTML = ''; return; }
     var p = d.primary;
     var extra = (d.cohorts || []).filter(function (c) { return !c.is_primary; });
+    var closedDays = (DAYS.days || []).filter(function (x) { return x.status === 'closed'; });
     box.innerHTML = '<div class="card saves-card ' + (p ? 'ok' : '') + '">' +
       '<div class="toolbar"><h2 class="section-title">מה נשמר מהיום הזה</h2><span class="spacer"></span>' +
       (p ? '<span class="rd-badge ok">צילום ראשי קיים ✓</span>' : '<span class="rd-badge">עדיין לא נשמר צילום ראשי</span>') + '</div>' +
@@ -346,10 +372,33 @@ window.AdminApp = (function () {
       '<p class="hint-text" style="margin-top:8px">הצילום הוא <b>עותק קפוא ונפרד</b> של התשובות — ממנו בודקים ונותנים ציונים. הוא שורד גם אם היום החי יימחק.</p>' +
       '<div class="btn-row"><button class="btn small" id="sv-open-grade">פתח את מסך הבדיקה</button>' +
       '<button class="btn ghost small" id="sv-dl-xls">הורד Excel של היום</button>' +
-      '<button class="btn ghost small" id="sv-dl-json">הורד JSON</button></div></div>';
+      '<button class="btn ghost small" id="sv-dl-json">הורד JSON</button></div></div>' +
+      // ── ארכיון: כל הימים הסגורים, להורדה מהירה ──
+      (closedDays.length
+        ? '<div class="card"><div class="toolbar"><h2 class="section-title">ארכיון — ימים סגורים (' + closedDays.length + ')</h2>' +
+          '<span class="spacer"></span><button class="btn small" id="ar-all">הורד הכול (חוברת אחת)</button></div>' +
+          '<p class="hint-text">כל יום שנסגר נשמר כאן. «הורד הכול» מוריד חוברת Excel אחת עם <b>גיליון לכל יום</b>.</p>' +
+          '<div class="arch-list">' + closedDays.map(function (d) {
+            return '<div class="arch-row"><div><b>' + esc(d.name) + '</b>' +
+              '<div style="font-size:12px;color:var(--muted)">' + fmtDay(d.created_at) + ' · ' + d.examinees + ' נבחנים · ' + d.total_rounds + ' סבבים' +
+              (d.has_snapshot ? ' · <span class="ok">נשמר לבדיקה ✓</span>' : ' · <span style="color:var(--warn)">בלי צילום בדיקה</span>') + '</div></div>' +
+              '<div style="display:flex;gap:6px"><button class="btn small ar-xls" data-id="' + d.id + '">הורד Excel</button>' +
+              '<button class="btn ghost small ar-json" data-id="' + d.id + '">JSON</button></div></div>';
+          }).join('') + '</div></div>'
+        : '');
     document.getElementById('sv-open-grade').onclick = function () { location.href = '/grade'; };
     document.getElementById('sv-dl-xls').onclick = downloadExcel;
     document.getElementById('sv-dl-json').onclick = downloadExport;
+    var arAll = document.getElementById('ar-all');
+    if (arAll) arAll.onclick = function () {
+      downloadBlob('/examiner/export-excel?all_closed=1', 'all-closed-days.xlsx').catch(function (e) { alert(e.message); });
+    };
+    box.querySelectorAll('.ar-xls').forEach(function (b) {
+      b.onclick = function () { downloadBlob('/examiner/export-excel?day_id=' + b.getAttribute('data-id'), 'answers-day' + b.getAttribute('data-id') + '.xlsx').catch(function (e) { alert(e.message); }); };
+    });
+    box.querySelectorAll('.ar-json').forEach(function (b) {
+      b.onclick = function () { downloadBlob('/examiner/export-all?day_id=' + b.getAttribute('data-id'), 'day' + b.getAttribute('data-id') + '.json').catch(function (e) { alert(e.message); }); };
+    });
   }
 
 
@@ -481,17 +530,28 @@ window.AdminApp = (function () {
     // חסינות: אם בטעות הועבר אירוע לחיצה (onclick = saveDay) — להתעלם ממנו
     // ולקרוא את השדות מהמסך, אחרת השינויים לא נשמרים.
     if (extra && (extra instanceof Event || extra.target || extra.currentTarget)) extra = null;
-    var body = extra || {};
-    if (!extra) {
-      body.name = document.getElementById('day-name').value;
-      body.title = document.getElementById('day-title').value;
-      body.total_rounds = Number(document.getElementById('day-rounds').value);
+    var body = {};
+    if (extra && extra.phase != null) {
+      // פעולת שלב ממוקדת (התחל/סיים מבחן) — לא נוגעים בשדות הטופס
+      body = extra;
+    } else {
+      // כפתור «שמור פרטי יום» — שומר את כל השדות שקיימים במסך
+      var fN = document.getElementById('day-name');
+      var fT = document.getElementById('day-title');
+      var fR = document.getElementById('day-rounds');
+      var fF = document.getElementById('day-finish');
+      if (fN) body.name = fN.value;
+      if (fT) body.title = fT.value;
+      if (fR) body.total_rounds = Number(fR.value);
+      if (fF) body.finish_message = fF.value;
+      if (extra) { for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) body[k] = extra[k]; }
     }
     var msg = document.getElementById('day-msg');
     try {
       await call('/examiner/update-day', 'POST', body);
-      if (msg) msg.innerHTML = '<div class="msg info">נשמר.</div>';
-      await loadDays(); refresh();
+      if (msg) msg.innerHTML = '';
+      if (body.phase == null) toast('פרטי היום נשמרו ✓');
+      await loadDays(); await refresh(); renderDaySaves();
     } catch (e) {
       if (msg) msg.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; else alert(e.message);
       await loadDays();
@@ -1178,8 +1238,23 @@ window.AdminApp = (function () {
 
   // ------------------------------------------------- פעולות סבב
   async function startRound(r) {
-    try { var res = await call('/examiner/start-round', 'POST', { round: r }); alert('סבב ' + r + ' התחיל · ' + res.interviews + ' בריאיון · ' + res.chapters + ' בפרק.'); refresh(); }
-    catch (e) { alert(e.message); }
+    // אזהרה מונעת: מי שטרם בחר מקצועות לא יקבל פרק בסבב הזה
+    // (הוא יצטרף אוטומטית ברגע שיבחר — תיקון עצמי בשרת).
+    var S = STATE || {};
+    var noSubj = (S.examinees || []).filter(function (e) {
+      return !e.left && !e.setup && !(e.marked_rounds || []).length;
+    });
+    if (noSubj.length) {
+      var names = noSubj.slice(0, 6).map(function (e) { return e.name; }).join(', ') + (noSubj.length > 6 ? ' ועוד…' : '');
+      if (!confirm(noSubj.length + ' נבחנים עדיין לא בחרו מקצועות:\n' + names +
+        '\n\nהם לא יקבלו פרק בסבב ' + r + ' — אבל יצטרפו אוטומטית ברגע שיבחרו.\n\nלהתחיל את הסבב בכל זאת?')) return;
+    }
+    try {
+      var res = await call('/examiner/start-round', 'POST', { round: r });
+      var extra = (res.no_subjects || []).length ? ' · ' + res.no_subjects.length + ' טרם בחרו מקצועות (יצטרפו כשיבחרו)' : '';
+      toast('סבב ' + r + ' התחיל · ' + res.interviews + ' בריאיון · ' + res.chapters + ' בפרק' + extra);
+      refresh();
+    } catch (e) { alert(e.message); }
   }
   async function endRound() {
     if (!confirm('לסיים את הסבב הנוכחי? כל הפרקים ייסגרו והנבחנים יעברו להמתנה לסבב הבא.')) return;

@@ -193,6 +193,16 @@ function totalRounds() {
 function chosenSubjectCount() {
   return Math.max(1, totalRounds() - 2);
 }
+// היום *של הנבחן* — לא בהכרח היום הפעיל (המנהל יכול להחליף יום בזמן שנבחן מחובר).
+function dayOfExaminee(ex) {
+  if (ex && ex.day_id) {
+    const d = db.prepare('SELECT * FROM days WHERE id = ?').get(ex.day_id);
+    if (d) return d;
+  }
+  return activeDay();
+}
+function isDayClosed(d) { return !!(d && d.status === 'closed'); }
+
 // «המבחן הסתיים» ו«הודעת הסיום» הם מצב של *היום* — לא של המערכת כולה.
 function examEnded() {
   const d = activeDay();
@@ -387,10 +397,12 @@ function buildExamineeState(ex) {
     server_now: now(),
   };
 
-  // המבחן הסתיים על-ידי הבוחן
-  if (examEnded()) {
+  // המבחן הסתיים על-ידי הבוחן, או שהיום נסגר (ארכיון) — לפי היום *של הנבחן*
+  const exDay = dayOfExaminee(ex);
+  if ((exDay && exDay.exam_ended) || isDayClosed(exDay)) {
     state.phase = 'ended';
-    state.message = finishMessage();
+    const m = exDay && exDay.finish_message != null ? String(exDay.finish_message).trim() : '';
+    state.message = m || DEFAULT_FINISH_MSG;
     return state;
   }
 
@@ -525,6 +537,11 @@ app.post('/api/register-morning', (req, res) => {
   if (!cleanName) return res.status(400).json({ error: 'נדרש שם.' });
 
   const existing = findByName(cleanName);
+  // יום סגור (ארכיון) — אין יותר הרשמה/כניסה
+  const targetDay = existing ? dayOfExaminee(existing) : activeDay();
+  if (isDayClosed(targetDay)) {
+    return res.status(403).json({ error: 'המבחן הסתיים והיום נסגר — לא ניתן להירשם. אם יש בעיה, פנו לצוות.' });
+  }
   if (existing) {
     if (!pinMatches(existing, cleanCode)) {
       return res.status(409).json({ error: 'השם הזה כבר רשום עם קוד אחר. אם זה את/ה — הזן/י את הקוד שבחרת. אחרת פנה/י למנהל.' });
@@ -602,8 +619,28 @@ app.post('/api/complete-setup', authExaminee, (req, res) => {
   }
   db.prepare('UPDATE examinees SET subjects = ?, math_level = ?, declaration = ?, status = ? WHERE code = ?')
     .run(JSON.stringify(chosenSubjects), mathLevel, JSON.stringify(declaration || null), 'active', ex.code);
-  // אין בניית slots מראש — נבנות חי בהתחלת סבב.
   logEvent(ex.code, 'complete_setup', ex.name);
+
+  // ⚠ תיקון עצמי: אם הסבב *כבר רץ* כשהנבחן סיים לבחור מקצועות — לשבץ אותו מיד.
+  // אחרת הוא היה נשאר בלי פרק עד הסבב הבא (הסבבים משבצים רק ב-start-round).
+  const runningNow = currentRunningRound();
+  if (runningNow && !getSlot(ex.code, runningNow)) {
+    const fresh = getExamineeByCode.get(ex.code);
+    try {
+      if (isMarkedInterview(runningNow, ex.code) && !hasInterviewed(ex.code)) {
+        db.prepare('INSERT INTO slots (code, round, kind, subject, level, chapter_id, duration_sec) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code, round) DO NOTHING')
+          .run(ex.code, runningNow, 'interview', null, null, null, SLOT_DURATION_SEC);
+        logEvent(ex.code, 'late_setup_slot', 'round ' + runningNow + ' interview');
+      } else {
+        const act = resolveActivity(fresh, runningNow);
+        if (act) {
+          db.prepare('INSERT INTO slots (code, round, kind, subject, level, chapter_id, duration_sec) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(code, round) DO NOTHING')
+            .run(ex.code, runningNow, act.kind, act.subject, act.level, act.chapter_id, SLOT_DURATION_SEC);
+          logEvent(ex.code, 'late_setup_slot', 'round ' + runningNow + ' ' + act.kind);
+        }
+      }
+    } catch (e) { /* לא לשבור את ההרשמה בגלל שיבוץ */ }
+  }
   res.json({ ok: true, state: buildExamineeState(getExamineeByCode.get(ex.code)) });
 });
 
@@ -839,6 +876,8 @@ app.get('/api/examiner/days', authExaminer, (req, res) => {
   const days = db.prepare('SELECT * FROM days ORDER BY id DESC').all().map((d) => ({
     ...d,
     examinees: db.prepare('SELECT COUNT(*) AS c FROM examinees WHERE day_id = ?').get(d.id).c,
+    // האם קיים צילום בדיקה ליום הזה (לארכיון — כדי לדעת מה כבר נשלח לבדיקה)
+    has_snapshot: db.prepare('SELECT COUNT(*) AS c FROM grading_cohorts WHERE day_id = ?').get(d.id).c > 0,
   }));
   res.json({ days, active_day_id: activeDayId(), min_rounds: MIN_ROUNDS, max_rounds: MAX_ROUNDS });
 });
@@ -1178,7 +1217,11 @@ app.post('/api/examiner/start-round', authExaminer, (req, res) => {
   }
   db.prepare("UPDATE day_rounds SET state = 'running', started_at = ?, released = 1, released_at = ? WHERE day_id = ? AND round = ?").run(now(), now(), activeDayId(), r);
   logEvent(null, 'start_round', `round ${r} · ${interviews} ריאיון · ${chapters} פרק`);
-  res.json({ ok: true, round: r, interviews, chapters });
+  // מי שטרם בחר מקצועות לא קיבל פרק — אבל יצטרף אוטומטית ברגע שיבחר (תיקון עצמי ב-complete-setup)
+  const noSubjects = examinees
+    .filter((e) => JSON.parse(e.subjects || '[]').length === 0 && !isMarkedInterview(r, e.code))
+    .map((e) => e.name);
+  res.json({ ok: true, round: r, interviews, chapters, no_subjects: noSubjects });
 });
 
 // סיום סבב — כל המשבצות נסגרות (done), הסבב עובר ל-ended
@@ -1685,7 +1728,11 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
   const d = activeDay();
   res.json({
     running, total_rounds: totalRounds(), rounds: roundsArr, examinees: list,
-    day: d ? { id: d.id, name: d.name, title: d.title, total_rounds: d.total_rounds, phase: d.phase } : null,
+    day: d ? {
+      id: d.id, name: d.name, title: d.title, total_rounds: d.total_rounds, phase: d.phase,
+      // נדרשים למסך: אינדיקציית «המבחן הסתיים»/«יום סגור» ותצוגת הודעת הסיום
+      status: d.status, exam_ended: !!d.exam_ended, finish_message: d.finish_message || '',
+    } : null,
     subject_count: chosenSubjectCount(),
     interviewers: ivList.map((v) => ({
       id: v.id, name: v.name, room: v.room || '', active: !!v.active,
@@ -2005,8 +2052,8 @@ app.get('/api/examiner/backup/:name', authExaminer, (req, res) => {
 });
 
 // הורדת כל התשובות כקובץ אקסל (קריא, מוכן לבדיקה ידנית או לשליחה)
-app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
-  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(Number(req.query && req.query.day_id) || activeDayId());
+function buildAnswerRows(dayId) {
+  const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId);
   const rows = [];
   for (const ex of examinees) {
     const answers = db.prepare('SELECT * FROM answers WHERE code = ? ORDER BY round, item_id').all(ex.code);
@@ -2039,15 +2086,49 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
       });
     }
   }
-  const header = ['שם', 'קוד', 'סבב', 'מקצוע', 'פרק', 'מזהה שאלה', 'סוג', 'השאלה', 'התשובה שנתן/ה', 'לא יודע/ת', 'נכון (רב-ברירה)', 'זמן (שניות)', 'עודכן'];
-  const ws = XLSX.utils.json_to_sheet(rows, { header });
+  return rows;
+}
+const ANSWER_HEADER = ['שם', 'קוד', 'סבב', 'מקצוע', 'פרק', 'מזהה שאלה', 'סוג', 'השאלה', 'התשובה שנתן/ה', 'לא יודע/ת', 'נכון (רב-ברירה)', 'זמן (שניות)', 'עודכן'];
+const ANSWER_COLS = [{ wch: 16 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 40 }, { wch: 50 }, { wch: 10 }, { wch: 14 }, { wch: 11 }, { wch: 18 }];
+function answerSheet(rows) {
+  const ws = XLSX.utils.json_to_sheet(rows, { header: ANSWER_HEADER });
   ws['!views'] = [{ RTL: true }];
-  ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 5 }, { wch: 12 }, { wch: 22 }, { wch: 10 }, { wch: 16 }, { wch: 40 }, { wch: 50 }, { wch: 10 }, { wch: 14 }, { wch: 11 }, { wch: 18 }];
+  ws['!cols'] = ANSWER_COLS;
+  return ws;
+}
+// שם גיליון חוקי ב-Excel: עד 31 תווים, בלי : \\ / ? * [ ]
+function safeSheetName(name, fallback) {
+  let n = String(name || '').replace(/[:\\/?*\[\]]/g, ' ').trim().slice(0, 31);
+  return n || fallback;
+}
+
+// ייצוא תשובות ל-Excel. ברירת מחדל: היום הפעיל. `day_id=N` ליום מסוים.
+// `all_closed=1` → חוברת אחת עם **גיליון לכל יום סגור** (ארכיון).
+app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
+  const q = req.query || {};
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'תשובות');
+  let filename = 'assessment-answers.xlsx';
+
+  if (String(q.all_closed || '') === '1') {
+    const days = db.prepare("SELECT * FROM days WHERE status = 'closed' ORDER BY id").all();
+    if (!days.length) return res.status(400).json({ error: 'אין ימים סגורים להורדה.' });
+    const used = {};
+    days.forEach((d, i) => {
+      let nm = safeSheetName(d.name, 'יום ' + d.id);
+      if (used[nm]) nm = safeSheetName(nm.slice(0, 27) + ' ' + (i + 1), 'יום ' + d.id);
+      used[nm] = true;
+      XLSX.utils.book_append_sheet(wb, answerSheet(buildAnswerRows(d.id)), nm);
+    });
+    filename = 'all-closed-days.xlsx';
+  } else {
+    const dayId = Number(q.day_id) || activeDayId();
+    XLSX.utils.book_append_sheet(wb, answerSheet(buildAnswerRows(dayId)), 'תשובות');
+    const d = db.prepare('SELECT name FROM days WHERE id = ?').get(dayId);
+    if (d) filename = 'answers-' + safeSheetName(d.name, 'day' + dayId).replace(/\s+/g, '-') + '.xlsx';
+  }
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="assessment-answers.xlsx"');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
   res.send(buf);
 });
 
