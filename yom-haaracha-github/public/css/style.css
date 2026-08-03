@@ -473,6 +473,34 @@ tr.gr-locked td { background: rgba(69,184,78,0.05); }
 .net-status.pending { background: rgba(35,179,164,0.16); color: #9ff0e4; border-top: 1px solid var(--teal); }
 .net-status.offline { background: rgba(251,92,107,0.18); color: #ffd7dc; border-top: 1px solid var(--danger); font-weight: 600; }
 
+/* ------- זהות היום במסך המראיין ------- */
+.iv-day-tag { text-align: center; font-size: 13px; color: var(--muted); background: rgba(35,179,164,0.09);
+  border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; margin: 0 0 12px; }
+.iv-day-tag b { color: var(--teal); }
+.iv-day-chip { font-size: 12px; font-weight: 700; background: rgba(35,179,164,0.14); color: #9ff0e4;
+  border: 1px solid var(--teal); border-radius: 999px; padding: 3px 12px; margin-inline-start: 4px; }
+
+/* ------- סוף היום + מה נשמר ------- */
+.day-gate.end { border-style: solid; border-color: rgba(69,184,78,0.35); background: rgba(69,184,78,0.05); }
+.saves-card { border-color: var(--warn) !important; background: rgba(247,183,49,0.05) !important; }
+.saves-card.ok { border-color: var(--ok) !important; background: rgba(69,184,78,0.06) !important; }
+.save-sum { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+.save-sum > span { flex: 1; min-width: 110px; text-align: center; background: rgba(255,255,255,0.04);
+  border-radius: 10px; padding: 10px 14px; }
+.save-sum small { display: block; font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+.save-sum b { font-size: 22px; font-weight: 800; color: #fff; }
+
+/* ------- בקרת בריפים ------- */
+.bf-pend { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start;
+  flex-wrap: wrap; border: 1px solid var(--border); border-radius: 10px; padding: 10px 13px; margin-bottom: 8px; }
+.bf-sugg { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
+.bf-sugg.none { color: var(--warn); }
+.bf-brief-txt { font-size: 12.5px; color: var(--faint); margin-top: 4px; max-width: 420px; line-height: 1.5; }
+.bf-conf { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-inline-start: 4px; }
+.bf-conf.high { background: rgba(69,184,78,0.16); color: #7ee08a; }
+.bf-conf.medium { background: rgba(247,183,49,0.16); color: var(--warn); }
+.bf-conf.low { background: rgba(251,92,107,0.14); color: #ff9ba4; }
+
 /* ------- פרומפט מוכן לבריפים ------- */
 .bf-prompt { background: rgba(255,255,255,0.03); border: 1px dashed var(--border); border-radius: 10px;
   padding: 11px 14px; font-size: 12.5px; line-height: 1.7; color: var(--muted); font-family: var(--mono);

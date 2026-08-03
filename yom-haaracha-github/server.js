@@ -15,6 +15,7 @@ const content = require('./lib/content');
 const schedule = require('./lib/schedule');
 const score = require('./lib/score');
 const aiGrade = require('./lib/aiGrade');
+const nameMatch = require('./lib/nameMatch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -192,6 +193,21 @@ function totalRounds() {
 function chosenSubjectCount() {
   return Math.max(1, totalRounds() - 2);
 }
+// «המבחן הסתיים» ו«הודעת הסיום» הם מצב של *היום* — לא של המערכת כולה.
+function examEnded() {
+  const d = activeDay();
+  return !!(d && d.exam_ended);
+}
+function setExamEnded(v) {
+  db.prepare('UPDATE days SET exam_ended = ? WHERE id = ?').run(v ? 1 : 0, activeDayId());
+}
+const DEFAULT_FINISH_MSG = 'המבחן הסתיים — תודה רבה! נא לעבור למשבצת הבאה לפי ההנחיות של הצוות.';
+function finishMessage() {
+  const d = activeDay();
+  const m = d && d.finish_message != null ? String(d.finish_message).trim() : '';
+  return m || DEFAULT_FINISH_MSG;
+}
+
 function dayPhase() {
   const d = activeDay();
   return d ? (d.phase || 'registration') : 'registration';
@@ -372,9 +388,9 @@ function buildExamineeState(ex) {
   };
 
   // המבחן הסתיים על-ידי הבוחן
-  if (getConfig('exam_ended') === '1') {
+  if (examEnded()) {
     state.phase = 'ended';
-    state.message = 'המבחן הסתיים. תודה רבה! אפשר לסגור את החלון.';
+    state.message = finishMessage();
     return state;
   }
 
@@ -840,7 +856,7 @@ app.post('/api/examiner/create-day', authExaminer, (req, res) => {
   const dayId = Number(info.lastInsertRowid);
   seedDayRounds(dayId, n, false);
   setConfig('active_day_id', dayId);
-  setConfig('exam_ended', '0');
+  setExamEnded(false);
   logEvent(null, 'create_day', name + ' · ' + n + ' סבבים');
   res.json({ ok: true, day_id: dayId });
 });
@@ -876,6 +892,8 @@ app.post('/api/examiner/update-day', authExaminer, (req, res) => {
     }
     if (b.name != null) db.prepare('UPDATE days SET name = ? WHERE id = ?').run(normName(b.name).slice(0, 120), day.id);
     if (b.title != null) db.prepare('UPDATE days SET title = ? WHERE id = ?').run(String(b.title).slice(0, 120), day.id);
+    // הודעת מסך הסיום — ניתנת לעריכה גם בלייב (הנבחנים מתעדכנים דרך ה-polling)
+    if (b.finish_message != null) db.prepare('UPDATE days SET finish_message = ? WHERE id = ?').run(String(b.finish_message).slice(0, 600), day.id);
     if (b.phase != null) {
       // שני שלבים בלבד: הרשמה ⇄ פתוח.
       const ph = b.phase === 'open' ? 'open' : 'registration';
@@ -896,6 +914,61 @@ app.post('/api/examiner/update-day', authExaminer, (req, res) => {
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
   }
+});
+
+// ============================================================
+//  «שמור יום» — סוגר את היום ומייצר את הצילום הראשי לבדיקה
+// ============================================================
+// פעולה אחת בסוף היום: גיבוי → סיום המבחן → סגירת סבב פעיל →
+// צילום ראשי לבדיקה (עותק קפוא) → סגירת היום לארכיון.
+app.post('/api/examiner/save-day', authExaminer, (req, res) => {
+  const day = activeDay();
+  if (!day) return res.status(400).json({ error: 'אין יום פעיל.' });
+  makeBackup('pre-save-day');
+  try {
+    // 1) סיום סבב פעיל אם יש (כדי שכל התשובות ייסגרו)
+    const running = currentRunningRound();
+    if (running) {
+      db.prepare("UPDATE examinees SET interviewed = 1 WHERE day_id = ? AND code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(day.id, running);
+      db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'" + DAY_SCOPE).run(running, day.id);
+      db.prepare("UPDATE day_rounds SET state = 'ended' WHERE day_id = ? AND round = ?").run(day.id, running);
+    }
+    // 2) המבחן הסתיים (פר-יום) — כל הנבחנים רואים את מסך הסיום
+    setExamEnded(true);
+    // 3) הצילום הראשי לבדיקה
+    const snap = createSnapshot(day.name, { primary: true });
+    // 4) היום עובר לארכיון
+    db.prepare("UPDATE days SET status = 'closed' WHERE id = ?").run(day.id);
+    logEvent(null, 'save_day', day.name + ' → צילום #' + snap.cohort_id);
+    res.json({
+      ok: true, day_name: day.name, cohort_id: snap.cohort_id, cohort_name: snap.name,
+      reused: snap.reused, examinees: snap.examinees, answers: snap.answers, teachItems: snap.teachItems,
+      ended_round: running || null,
+    });
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// מה נשמר מהיום הזה — כדי שתמיד יהיה ברור מה קיים ואיפה
+app.get('/api/examiner/day-saves', authExaminer, (req, res) => {
+  const dayId = activeDayId();
+  const day = activeDay();
+  const cohorts = db.prepare('SELECT * FROM grading_cohorts WHERE day_id = ? ORDER BY id DESC').all(dayId).map((c) => ({
+    id: c.id, name: c.name, created_at: c.created_at, is_primary: !!c.is_primary, status: c.status,
+    examinees: db.prepare('SELECT COUNT(*) AS c FROM grading_examinees WHERE cohort_id = ?').get(c.id).c,
+    answers: db.prepare('SELECT COUNT(*) AS c FROM grading_answers WHERE cohort_id = ?').get(c.id).c,
+  }));
+  const primary = cohorts.find((c) => c.is_primary) || null;
+  // מה יש כרגע בצד החי (לפני צילום)
+  const liveExaminees = db.prepare('SELECT COUNT(*) AS c FROM examinees WHERE day_id = ?').get(dayId).c;
+  const liveAnswers = db.prepare('SELECT COUNT(*) AS c FROM answers WHERE code IN (SELECT code FROM examinees WHERE day_id = ?)').get(dayId).c;
+  res.json({
+    day: day ? { id: day.id, name: day.name, status: day.status, exam_ended: !!day.exam_ended } : null,
+    primary, cohorts,
+    live: { examinees: liveExaminees, answers: liveAnswers },
+    db_path: DB_PATH,
+  });
 });
 
 // סגירת יום (ארכיון) / פתיחה מחדש. הנתונים נשארים נגישים במלואם.
@@ -1166,7 +1239,7 @@ app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
   db.prepare('DELETE FROM answers WHERE code IN (SELECT code FROM examinees WHERE day_id = ?)').run(dayId);
   db.prepare('UPDATE examinees SET interviewed = 0, in_interview = 0 WHERE day_id = ?').run(dayId);
   db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ?").run(dayId);
-  setConfig('exam_ended', '0');
+  setExamEnded(false);
   logEvent(null, 'full_reset', 'יום ' + dayId);
   res.json({ ok: true });
 });
@@ -1356,31 +1429,103 @@ app.post('/api/examiner/assign-interviewer', authExaminer, (req, res) => {
 
 // הזנת בריפים בכמות: שורה לכל נבחן, «שם <מפריד> בריף».
 // מפצלים על *התו הראשון בלבד* (טאב → | → פסיק) כדי שפסיקים בתוך הבריף לא ישברו.
+// התאמה מדויקת → משייך. התאמה מקורבת → *מציע בלבד*. לא נמצא → נשמר כממתין לשיוך.
 app.post('/api/examiner/set-briefs-bulk', authExaminer, (req, res) => {
   const text = String((req.body && req.body.text) || '');
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const dayId = activeDayId();
   const all = db.prepare('SELECT code, name FROM examinees WHERE day_id = ?').all(dayId);
-  const byName = {};
-  all.forEach((e) => { byName[normName(e.name)] = e.code; });
-  let updated = 0; const notFound = []; const skipped = [];
+
+  let updated = 0;
+  const suggested = [];    // שם מהדבקה + הצעות שיוך (לא שויך!)
+  const unmatched = [];    // לא נמצאה שום התאמה — נשמר כממתין
+  const skipped = [];
+  const seen = {};         // לזיהוי כפילויות בתוך ההדבקה
+  const duplicates = [];
+
   for (const line of lines) {
-    // התו המפריד הראשון שמופיע בשורה
     let idx = -1;
     for (const sep of ['\t', '|', ',']) {
       const at = line.indexOf(sep);
       if (at > 0 && (idx === -1 || at < idx)) idx = at;
     }
     if (idx <= 0) { skipped.push(line.slice(0, 60) + ' (אין מפריד)'); continue; }
-    const name = normName(line.slice(0, idx));
-    const brief = line.slice(idx + 1).trim();
-    const code = byName[name];
-    if (!code) { notFound.push(name); continue; }
-    db.prepare('UPDATE examinees SET interview_brief = ? WHERE code = ?').run(brief.slice(0, 2000), code);
-    updated++;
+    const rawName = normName(line.slice(0, idx));
+    const brief = line.slice(idx + 1).trim().slice(0, 2000);
+    if (!rawName) { skipped.push(line.slice(0, 60) + ' (חסר שם)'); continue; }
+
+    const m = nameMatch.matchName(rawName, all);
+    if (m.exact) {
+      const key = m.exact.code;
+      if (seen[key]) duplicates.push(m.exact.name);   // אותו נבחן פעמיים — האחרון קובע
+      seen[key] = true;
+      db.prepare('UPDATE examinees SET interview_brief = ? WHERE code = ?').run(brief, m.exact.code);
+      updated++;
+      continue;
+    }
+    // לא מדויק — שומרים כממתין (עם ההצעות שיוצגו במסך הבקרה)
+    const info = db.prepare('INSERT INTO pending_briefs (day_id, raw_name, brief, created_at) VALUES (?, ?, ?, ?)')
+      .run(dayId, rawName, brief, now());
+    const rec = { pending_id: Number(info.lastInsertRowid), raw_name: rawName, brief: brief, suggestions: m.suggestions };
+    if (m.suggestions.length) suggested.push(rec); else unmatched.push(rec);
   }
-  logEvent(null, 'set_briefs_bulk', updated + ' עודכנו');
-  res.json({ ok: true, updated, notFound, skipped });
+  logEvent(null, 'set_briefs_bulk', updated + ' שויכו · ' + suggested.length + ' להצעה · ' + unmatched.length + ' ללא התאמה');
+  res.json({ ok: true, updated, suggested, unmatched, duplicates, skipped });
+});
+
+// תמונת מצב מלאה של הבריפים — מי יש, מי אין, ומה ממתין לשיוך
+app.get('/api/examiner/briefs-status', authExaminer, (req, res) => {
+  const dayId = activeDayId();
+  const all = db.prepare('SELECT code, name, interview_brief, status FROM examinees WHERE day_id = ? ORDER BY name').all(dayId);
+  const examinees = all.map((e) => ({
+    code: e.code, name: e.name,
+    brief: e.interview_brief || '',
+    has_brief: !!String(e.interview_brief || '').trim(),
+    left: e.status === 'left',
+  }));
+  // כפילויות שם בתוך היום (מקור אמיתי לבלבול בשיוך)
+  const nameCount = {};
+  all.forEach((e) => { const k = normName(e.name); nameCount[k] = (nameCount[k] || 0) + 1; });
+  const dupNames = Object.keys(nameCount).filter((k) => nameCount[k] > 1);
+
+  const pendingRows = db.prepare('SELECT * FROM pending_briefs WHERE day_id = ? ORDER BY id').all(dayId);
+  const pending = pendingRows.map((p) => ({
+    pending_id: p.id, raw_name: p.raw_name, brief: p.brief || '',
+    suggestions: nameMatch.matchName(p.raw_name, all.map((e) => ({ code: e.code, name: e.name }))).suggestions,
+  }));
+
+  res.json({
+    examinees,
+    with_brief: examinees.filter((e) => e.has_brief).length,
+    without_brief: examinees.filter((e) => !e.has_brief && !e.left).length,
+    pending: pending,
+    duplicate_names: dupNames,
+  });
+});
+
+// שיוך מהיר של בריף ממתין לנבחן שנבחר
+app.post('/api/examiner/assign-pending-brief', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const p = db.prepare('SELECT * FROM pending_briefs WHERE id = ? AND day_id = ?').get(Number(b.pending_id), activeDayId());
+  if (!p) return res.status(404).json({ error: 'הבריף הממתין לא נמצא.' });
+  const ex = getExamineeByCode.get(b.code);
+  if (!ex || ex.day_id !== activeDayId()) return res.status(404).json({ error: 'נבחן לא נמצא ביום הזה.' });
+  db.prepare('UPDATE examinees SET interview_brief = ? WHERE code = ?').run(String(p.brief || '').slice(0, 2000), ex.code);
+  db.prepare('DELETE FROM pending_briefs WHERE id = ?').run(p.id);
+  logEvent(ex.code, 'assign_brief', p.raw_name + ' → ' + ex.name);
+  res.json({ ok: true, name: ex.name });
+});
+
+app.post('/api/examiner/delete-pending-brief', authExaminer, (req, res) => {
+  db.prepare('DELETE FROM pending_briefs WHERE id = ? AND day_id = ?').run(Number((req.body || {}).pending_id), activeDayId());
+  res.json({ ok: true });
+});
+
+app.post('/api/examiner/clear-brief', authExaminer, (req, res) => {
+  const ex = getExamineeByCode.get((req.body || {}).code);
+  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  db.prepare("UPDATE examinees SET interview_brief = '' WHERE code = ?").run(ex.code);
+  res.json({ ok: true });
 });
 
 // בריף קצר על נבחן — מה שהמראיין שלו יראה
@@ -1766,14 +1911,14 @@ app.post('/api/examiner/pause-all', authExaminer, (req, res) => {
 // סיום המבחן כולו (לפני הזמן) — כל הנבחנים עוברים למסך "המבחן הסתיים"
 app.post('/api/examiner/end-exam', authExaminer, (req, res) => {
   const ended = !(req.body && req.body.ended === false);
-  setConfig('exam_ended', ended ? '1' : '0');
+  setExamEnded(ended);
   logEvent(null, ended ? 'end_exam' : 'reopen_exam', '');
   res.json({ ok: true, ended });
 });
 
 // מצב המבחן (האם הסתיים)
 app.get('/api/examiner/exam-state', authExaminer, (req, res) => {
-  res.json({ ended: getConfig('exam_ended') === '1' });
+  res.json({ ended: examEnded(), finish_message: finishMessage() });
 });
 
 // בונה מבנה ייצוא מלא (משמש גם לייצוא ידני וגם לגיבוי אוטומטי)
@@ -2062,21 +2207,33 @@ async function runGradingJob(cohortId, items, cfg, job) {
   job.finishedAt = now();
 }
 
-// צילום-מצב: מעתיק עותק קפוא מהמערכת החיה למחזור בדיקה חדש (idempotent לפי source_hash)
-app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
-  const name = String((req.body && req.body.name) || '').trim() || ('בדיקה ' + new Date().toLocaleDateString('he-IL'));
-  const withAns = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(activeDayId())
+// צילום-מצב: מעתיק עותק קפוא מהמערכת החיה למחזור בדיקה חדש (idempotent לפי source_hash).
+// מוצא כפונקציה כדי ש«שמור יום» יוכל להשתמש בו גם.
+function createSnapshot(name, opts) {
+  opts = opts || {};
+  const dayId = activeDayId();
+  const withAns = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId)
     .map((ex) => ({ ex: ex, ans: db.prepare('SELECT * FROM answers WHERE code=? ORDER BY chapter_id,item_id').all(ex.code) }))
     .filter((o) => o.ans.length > 0);
-  if (!withAns.length) return res.status(400).json({ error: 'אין נבחנים עם תשובות לצילום.' });
+  if (!withAns.length) throw Object.assign(new Error('אין נבחנים עם תשובות לצילום.'), { status: 400 });
   const hashParts = withAns.map((o) => o.ex.code + ':' + o.ans.map((a) => a.item_id + '=' + (a.answer || '') + '#' + (a.updated_at || 0) + (a.dont_know ? 'd' : '')).join(','));
   const sourceHash = crypto.createHash('sha256').update(hashParts.join('|')).digest('hex').slice(0, 16);
   const existing = db.prepare('SELECT * FROM grading_cohorts WHERE source_hash=? ORDER BY id DESC').get(sourceHash);
-  if (existing) return res.json({ ok: true, cohort_id: existing.id, reused: true, name: existing.name });
+  if (existing) {
+    // אותם נתונים בדיוק — לא מכפילים. אם ביקשו "ראשי", מסמנים את הקיים.
+    if (opts.primary) {
+      db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
+      db.prepare('UPDATE grading_cohorts SET is_primary = 1, day_id = ? WHERE id = ?').run(dayId, existing.id);
+    }
+    const cnt = db.prepare('SELECT COUNT(*) AS c FROM grading_answers WHERE cohort_id = ?').get(existing.id).c;
+    const tc = db.prepare('SELECT COUNT(*) AS c FROM grading_items WHERE cohort_id = ?').get(existing.id).c;
+    return { cohort_id: existing.id, name: existing.name, reused: true, examinees: withAns.length, answers: cnt, teachItems: tc };
+  }
 
   const lockedNames = new Set(db.prepare('SELECT name FROM grading_examinees WHERE locked=1').all().map((r) => normName(r.name)));
-  const info = db.prepare('INSERT INTO grading_cohorts (name, created_at, source_hash, status, weights_json) VALUES (?,?,?,?,?)')
-    .run(name, now(), sourceHash, 'open', JSON.stringify(score.CONFIG));
+  if (opts.primary) db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
+  const info = db.prepare('INSERT INTO grading_cohorts (name, created_at, source_hash, status, weights_json, day_id, is_primary) VALUES (?,?,?,?,?,?,?)')
+    .run(name, now(), sourceHash, 'open', JSON.stringify(score.CONFIG), dayId, opts.primary ? 1 : 0);
   const cohortId = Number(info.lastInsertRowid);
 
   const insEx = db.prepare('INSERT INTO grading_examinees (cohort_id,code,name,subjects,math_level,declaration,include_in_sheet,partial) VALUES (?,?,?,?,?,?,?,?)');
@@ -2097,7 +2254,15 @@ app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
   const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
   withAns.forEach((o) => computeAndStoreRollup(cohortId, o.ex.code, cfg));
   recomputeRanks(cohortId);
-  res.json({ ok: true, cohort_id: cohortId, name: name, examinees: withAns.length, teachItems: teachCount });
+  const answersCount = withAns.reduce((n, o) => n + o.ans.length, 0);
+  return { cohort_id: cohortId, name: name, reused: false, examinees: withAns.length, answers: answersCount, teachItems: teachCount };
+}
+
+app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim() || ('בדיקה ' + new Date().toLocaleDateString('he-IL'));
+  try {
+    res.json(Object.assign({ ok: true }, createSnapshot(name, { primary: false })));
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
 });
 
 app.get('/api/examiner/grading/cohorts', authExaminer, (req, res) => {

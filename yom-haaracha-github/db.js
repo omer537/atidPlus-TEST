@@ -160,6 +160,15 @@ CREATE TABLE IF NOT EXISTS interviewers (
   created_at INTEGER NOT NULL
 );
 
+-- בריפים שהודבקו ולא נמצאה להם התאמת שם — נשמרים כדי שאפשר יהיה לשייך ידנית.
+CREATE TABLE IF NOT EXISTS pending_briefs (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_id     INTEGER NOT NULL,
+  raw_name   TEXT NOT NULL,      -- השם כפי שהודבק
+  brief      TEXT,
+  created_at INTEGER NOT NULL
+);
+
 -- בקשות החלפה בלו"ז הריאיונות: המראיין מבקש, המנהל מאשר (ואז מבוצע בפועל).
 CREATE TABLE IF NOT EXISTS interview_swap_requests (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,6 +269,20 @@ CREATE TABLE IF NOT EXISTS grading_audit (
 );
 `);
 
+// מיגרציה שנייה — עמודות על טבלאות שנוצרות למעלה (days / grading_cohorts).
+// ⚠ חייבת לרוץ *אחרי* יצירתן, אחרת ה-ALTER נכשל בשקט והעמודה לא נוספת.
+for (const alter of [
+  // «המבחן הסתיים» הוא מצב של *יום* מסוים, לא של המערכת כולה.
+  'ALTER TABLE days ADD COLUMN exam_ended INTEGER NOT NULL DEFAULT 0',
+  // ההודעה שהנבחן רואה במסך הסיום — המנהל עורך אותה בעצמו.
+  'ALTER TABLE days ADD COLUMN finish_message TEXT',
+  // צילום לבדיקה: מאיזה יום הוא בא, והאם הוא הצילום הראשי של אותו יום.
+  'ALTER TABLE grading_cohorts ADD COLUMN day_id INTEGER',
+  'ALTER TABLE grading_cohorts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0',
+]) {
+  try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
+}
+
 // אתחול 5 סבבים אם עדיין לא קיימים (טבלת rounds הישנה — נשמרת לתאימות ולמיגרציה).
 const roundCount = db.prepare('SELECT COUNT(*) AS c FROM rounds').get().c;
 if (roundCount === 0) {
@@ -311,7 +334,19 @@ if (dayCount === 0) {
 try {
   const active = db.prepare("SELECT value FROM config WHERE key = 'active_day_id'").get();
   if (active && active.value) {
-    db.prepare('UPDATE examinees SET day_id = ? WHERE day_id IS NULL').run(Number(active.value));
+    const aid = Number(active.value);
+    db.prepare('UPDATE examinees SET day_id = ? WHERE day_id IS NULL').run(aid);
+    // מיגרציה חד-פעמית: «המבחן הסתיים» היה מצב גלובלי — מעבירים ליום הפעיל.
+    const migrated = db.prepare("SELECT value FROM config WHERE key = 'exam_ended_migrated'").get();
+    if (!migrated) {
+      const globalEnded = db.prepare("SELECT value FROM config WHERE key = 'exam_ended'").get();
+      if (globalEnded && globalEnded.value === '1') {
+        db.prepare('UPDATE days SET exam_ended = 1 WHERE id = ?').run(aid);
+      }
+      db.prepare("INSERT INTO config (key, value) VALUES ('exam_ended_migrated', '1') ON CONFLICT(key) DO NOTHING").run();
+    }
+    // צילומי בדיקה קיימים שאין להם יום — משויכים ליום הפעיל (היו נוצרים ממנו).
+    db.prepare('UPDATE grading_cohorts SET day_id = ? WHERE day_id IS NULL').run(aid);
   }
 } catch (e) { /* לא קריטי */ }
 

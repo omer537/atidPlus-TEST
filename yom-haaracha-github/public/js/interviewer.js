@@ -36,6 +36,8 @@ window.InterviewerApp = (function () {
     root.className = 'center-screen';
     var list = [];
     try { list = (await call('/interviewers-public')).interviewers || []; } catch (e) { list = []; }
+    var dayInfo = null;
+    try { dayInfo = await call('/day-info'); } catch (e) { dayInfo = null; }
     var opts = '<option value="">— בחרו את שמכם —</option>' + list.map(function (v) {
       return '<option value="' + v.id + '">' + esc(v.name) + (v.room ? ' · ' + esc(v.room) : '') + '</option>';
     }).join('');
@@ -43,6 +45,7 @@ window.InterviewerApp = (function () {
     root.appendChild(el(
       '<div class="card" style="max-width:420px;width:100%">' + BRAND +
       '<h2>כניסת מראיין/ת</h2>' +
+      (dayInfo && dayInfo.title ? '<div class="iv-day-tag">אתם נכנסים ל: <b>' + esc(dayInfo.title) + '</b></div>' : '') +
       '<p class="lead">בחרו את שמכם והזינו את סיסמת המראיינים.</p>' +
       (errMsg ? '<div class="msg error">' + esc(errMsg) + '</div>' : '') +
       (list.length ? '' : '<div class="msg warn">עדיין לא הוגדרו מראיינים ליום הזה. המנהל צריך להוסיף מראיינים וחדרים.</div>') +
@@ -125,6 +128,7 @@ window.InterviewerApp = (function () {
       '<img class="logo" src="/img/logo.svg" alt="עתיד פלוס" style="height:42px">' +
       '<span class="wordmark" style="font-size:20px;font-weight:800">עתיד פלוס</span>' +
       '<span style="color:var(--muted);font-size:14px">· מסך מראיין</span>' +
+      (D.day ? '<span class="iv-day-chip">' + esc(D.day.name) + '</span>' : '') +
       '<div class="spacer"></div>' +
       '<span class="iv-me"><b>' + esc(iv.name) + '</b>' + (iv.room ? '<span class="iv-room-tag">' + esc(iv.room) + '</span>' : '') + '</span>' +
       '<button class="btn ghost small" id="iv-out">יציאה</button></div>' +

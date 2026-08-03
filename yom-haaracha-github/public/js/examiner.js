@@ -74,6 +74,8 @@ window.AdminApp = (function () {
       '<div class="card"><div id="day-setup"></div></div>' +
       // בקשות החלפה מהמראיינים
       '<div id="swaps"></div>' +
+      // מה נשמר מהיום הזה (צילום לבדיקה)
+      '<div id="day-saves"></div>' +
       // פס מוכנות — תנאי בסיס ושיבוץ ריאיונות
       '<div id="readiness"></div>' +
       // מראיינים וחדרים
@@ -227,6 +229,18 @@ window.AdminApp = (function () {
         : '<div class="dg-text"><b>המבחן פתוח.</b> הנבחנים רואים את ההוראות, ההצהרה ובחירת המקצועות. אחרי שכולם בחרו — «התחל סבב 1» למטה.</div>' +
           '<button class="btn ghost small" id="btn-close-reg">חזור לשלב הרשמה</button>') +
       '</div>' +
+      // ── סוף היום ──
+      (phase === 'open'
+        ? '<div class="day-gate end">' +
+          '<div class="dg-text"><b>סוף היום.</b> «סיים מבחן» מעביר את כולם למסך הסיום עם ההודעה שלמטה. ' +
+          '«שמור יום» מסיים, יוצר את <b>הצילום הראשי לבדיקה</b> וסוגר את היום לארכיון.</div>' +
+          '<button class="btn ghost small" id="btn-end-exam-top">סיים מבחן</button>' +
+          '<button class="btn" id="btn-save-day">שמור יום ✓</button>' +
+          '</div>' +
+          '<label class="field" style="margin-top:10px"><span>הודעה שהנבחן יראה במסך הסיום (ניתן לשנות גם בזמן היום)</span>' +
+          '<textarea id="day-finish" style="min-height:56px">' + esc(day.finish_message || '') + '</textarea></label>' +
+          '<div class="btn-row" style="margin-top:-4px"><button class="btn ghost small" id="btn-save-finish">שמור הודעה</button></div>'
+        : '') +
 
       // ── עריכת פרטי היום ──
       '<div class="day-grid">' +
@@ -262,6 +276,16 @@ window.AdminApp = (function () {
       if (!confirm('לחזור לשלב הרשמה?\n\nהנבחנים יראו שוב את מסך «נרשמת בהצלחה». אפשר רק לפני שהתחיל סבב.')) return;
       saveDay({ phase: 'registration' });
     };
+    var eb = document.getElementById('btn-end-exam-top');
+    if (eb) eb.onclick = endExam;
+    var sd = document.getElementById('btn-save-day');
+    if (sd) sd.onclick = saveDayFinal;
+    var sf = document.getElementById('btn-save-finish');
+    if (sf) sf.onclick = function () {
+      var t = document.getElementById('day-finish');
+      saveDay({ finish_message: t ? t.value : '' });
+      toast('הודעת הסיום נשמרה — הנבחנים יראו אותה מיד');
+    };
     var dr = document.getElementById('day-rounds');
     if (dr) dr.onchange = function () {
       var v = Number(this.value), sc = Math.max(1, v - 2);
@@ -269,6 +293,65 @@ window.AdminApp = (function () {
     };
   }
   function fmtDay(ms) { try { return new Date(ms).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
+  function fmtWhenFull(ms) { try { return new Date(ms).toLocaleString('he-IL'); } catch (e) { return ''; } }
+
+  // ------------------------------------------------- «שמור יום» + מה נשמר
+  async function saveDayFinal() {
+    if (!confirm('לשמור ולסגור את היום?\n\n• כל הנבחנים יעברו למסך הסיום\n• ייווצר הצילום הראשי לבדיקה (עותק קפוא של כל התשובות)\n• היום יעבור לארכיון — הנתונים יישארו נגישים במלואם')) return;
+    try {
+      var r = await call('/examiner/save-day', 'POST', {});
+      await loadDays(); await refresh(); renderDaySaves();
+      showSaveResult(r);
+      toast('היום נשמר ✓ — ' + r.examinees + ' נבחנים, ' + r.answers + ' תשובות');
+    } catch (e) { alert('השמירה לא הושלמה: ' + e.message); }
+  }
+
+  function showSaveResult(r) {
+    var m = document.getElementById('save-modal');
+    if (!m) { m = el('<div class="modal-back" id="save-modal"></div>'); document.body.appendChild(m); }
+    m.onclick = function (ev) { if (ev.target === m) m.remove(); };
+    m.innerHTML = '<div class="modal-card" style="max-width:560px">' +
+      '<h2 style="margin:0 0 6px;font-size:20px">היום נשמר ✓</h2>' +
+      '<p class="hint-text">היום «' + esc(r.day_name) + '» נסגר, וכל התשובות הועברו לצילום קפוא לבדיקה.</p>' +
+      '<div class="save-sum">' +
+      '<span><small>נבחנים</small><b>' + r.examinees + '</b></span>' +
+      '<span><small>תשובות</small><b>' + r.answers + '</b></span>' +
+      '<span><small>שאלות «למד» לבדיקה</small><b>' + r.teachItems + '</b></span>' +
+      '</div>' +
+      '<div class="msg info" style="margin-top:12px"><b>איפה זה נשמר:</b> הצילום «' + esc(r.cohort_name) + '» נמצא ב<b>מסך הבדיקה</b>. ' +
+      'הוא עותק <b>קפוא ונפרד</b> מנתוני היום — הוא לא ישתנה ולא ייעלם, גם אם תמחק את היום עצמו.</div>' +
+      '<div class="btn-row"><button class="btn" id="sv-grade">פתח את מסך הבדיקה</button>' +
+      '<button class="btn ghost" id="sv-xls">הורד Excel</button>' +
+      '<button class="btn ghost" id="sv-x">סגור</button></div></div>';
+    document.getElementById('sv-x').onclick = function () { m.remove(); };
+    document.getElementById('sv-grade').onclick = function () { location.href = '/grade'; };
+    document.getElementById('sv-xls').onclick = function () { downloadExcel(); };
+  }
+
+  async function renderDaySaves() {
+    var box = document.getElementById('day-saves'); if (!box) return;
+    var d;
+    try { d = await call('/examiner/day-saves'); } catch (e) { box.innerHTML = ''; return; }
+    var p = d.primary;
+    var extra = (d.cohorts || []).filter(function (c) { return !c.is_primary; });
+    box.innerHTML = '<div class="card saves-card ' + (p ? 'ok' : '') + '">' +
+      '<div class="toolbar"><h2 class="section-title">מה נשמר מהיום הזה</h2><span class="spacer"></span>' +
+      (p ? '<span class="rd-badge ok">צילום ראשי קיים ✓</span>' : '<span class="rd-badge">עדיין לא נשמר צילום ראשי</span>') + '</div>' +
+      '<div class="rd-row"><span class="rd-dot ok"></span><span><b>נתוני היום (חי):</b> ' +
+      d.live.examinees + ' נבחנים · ' + d.live.answers + ' תשובות — שמורים בבסיס הנתונים על הדיסק הקבוע של השרת, מופרדים לפי יום.</span></div>' +
+      '<div class="rd-row"><span class="rd-dot ' + (p ? 'ok' : 'warn') + '"></span><span><b>צילום לבדיקה:</b> ' +
+      (p ? '«' + esc(p.name) + '» נשמר ב-' + fmtWhenFull(p.created_at) + ' · ' + p.examinees + ' נבחנים · ' + p.answers + ' תשובות'
+         : 'טרם נוצר. לחצו «שמור יום» בסוף היום — או «צלם מצב» במסך הבדיקה בכל רגע.') + '</span></div>' +
+      (extra.length ? '<div class="rd-row"><span class="rd-dot"></span><span>צילומים נוספים: ' + extra.length + ' (' + extra.map(function (c) { return esc(c.name); }).join(', ') + ')</span></div>' : '') +
+      '<p class="hint-text" style="margin-top:8px">הצילום הוא <b>עותק קפוא ונפרד</b> של התשובות — ממנו בודקים ונותנים ציונים. הוא שורד גם אם היום החי יימחק.</p>' +
+      '<div class="btn-row"><button class="btn small" id="sv-open-grade">פתח את מסך הבדיקה</button>' +
+      '<button class="btn ghost small" id="sv-dl-xls">הורד Excel של היום</button>' +
+      '<button class="btn ghost small" id="sv-dl-json">הורד JSON</button></div></div>';
+    document.getElementById('sv-open-grade').onclick = function () { location.href = '/grade'; };
+    document.getElementById('sv-dl-xls').onclick = downloadExcel;
+    document.getElementById('sv-dl-json').onclick = downloadExport;
+  }
+
 
   // ------------------------------------------------- מודאל: הקמת יום
   function openDayModal() {
@@ -593,6 +676,7 @@ window.AdminApp = (function () {
         /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     box.innerHTML =
       '<div class="toolbar"><h2 class="section-title">בריפים למראיינים</h2><span class="spacer"></span>' +
+      '<button class="btn small" id="bf-control">בקרת בריפים</button>' +
       '<button class="btn ghost small" id="bf-copy">העתק פרומפט לקלוד</button></div>' +
       '<p class="hint-text">כל מראיין רואה בריף קצר על כל מי שהוא מראיין. הדרך המהירה: שלחו לקלוד את טבלת האקסל שלכם עם הפרומפט המוכן (כפתור «העתק פרומפט»), והדביקו כאן את התשובה.</p>' +
       '<div class="bf-prompt" id="bf-prompt-box">' + esc(BRIEF_PROMPT).replace(/\n/g, '<br>') + '</div>' +
@@ -601,6 +685,7 @@ window.AdminApp = (function () {
       '<div class="btn-row"><button class="btn small" id="bf-go">עדכן בריפים</button></div>' +
       '<div id="bf-msg" style="margin-top:10px"></div>';
 
+    document.getElementById('bf-control').onclick = openBriefsControl;
     document.getElementById('bf-copy').onclick = function () {
       var done = function () { toast('הפרומפט הועתק — שלחו אותו לקלוד עם טבלת האקסל'); };
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -620,14 +705,117 @@ window.AdminApp = (function () {
       if (!text.trim()) { msg.innerHTML = '<div class="msg error">אין מה לעדכן — הדביקו קודם.</div>'; return; }
       try {
         var r = await call('/examiner/set-briefs-bulk', 'POST', { text: text });
-        var html = '<div class="msg info">עודכנו ' + r.updated + ' בריפים.</div>';
-        if (r.notFound && r.notFound.length) html += '<div class="msg warn">שמות שלא נמצאו ביום הזה (' + r.notFound.length + '): ' + esc(r.notFound.join(', ')) + '</div>';
+        var html = '<div class="msg info">שויכו ' + r.updated + ' בריפים (התאמת שם מדויקת).</div>';
+        if ((r.suggested || []).length) html += '<div class="msg warn">' + r.suggested.length + ' שמות דומים אך לא זהים — <b>מחכים לאישור שלך</b> במסך «בקרת בריפים».</div>';
+        if ((r.unmatched || []).length) html += '<div class="msg warn">' + r.unmatched.length + ' שמות ללא התאמה — נשמרו לשיוך ידני.</div>';
+        if ((r.duplicates || []).length) html += '<div class="msg warn">הופיעו פעמיים בהדבקה (האחרון נשמר): ' + esc(r.duplicates.join(', ')) + '</div>';
         if (r.skipped && r.skipped.length) html += '<div class="msg warn">שורות שדולגו (' + r.skipped.length + '): ' + esc(r.skipped.join(' · ')) + '</div>';
         msg.innerHTML = html;
         toast('עודכנו ' + r.updated + ' בריפים ✓');
+        document.getElementById('bf-text').value = '';
         refresh();
+        // אם יש מה לשייך ידנית — פותחים מיד את מסך הבקרה
+        var needsWork = (r.suggested || []).length + (r.unmatched || []).length;
+        if (needsWork) openBriefsControl();
       } catch (e) { msg.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
     };
+  }
+
+  // ------------------------------------------------- מודאל: בקרת בריפים
+  var BF_ONLY_MISSING = false;
+  async function openBriefsControl() {
+    var d;
+    try { d = await call('/examiner/briefs-status'); } catch (e) { alert(e.message); return; }
+    var m = document.getElementById('bf-modal');
+    if (!m) { m = el('<div class="modal-back" id="bf-modal"></div>'); document.body.appendChild(m); }
+    m.onclick = function (ev) { if (ev.target === m) m.remove(); };
+
+    var opts = d.examinees.map(function (e) { return { code: e.code, name: e.name }; });
+    // בריפים שממתינים לשיוך — עם ההצעה הטובה ביותר מסומנת מראש
+    var pendHtml = (d.pending || []).length
+      ? (d.pending || []).map(function (p) {
+          var best = (p.suggestions || [])[0];
+          var sel = '<option value="">— בחרו נבחן —</option>' + opts.map(function (o) {
+            return '<option value="' + esc(o.code) + '"' + (best && best.code === o.code ? ' selected' : '') + '>' + esc(o.name) + '</option>';
+          }).join('');
+          var hint = best
+            ? '<div class="bf-sugg">הצעה: <b>' + esc(best.name) + '</b> — ' + esc(best.reason) + ' <span class="bf-conf ' + best.confidence + '">' +
+              (best.confidence === 'high' ? 'ביטחון גבוה' : (best.confidence === 'medium' ? 'ביטחון בינוני' : 'ביטחון נמוך')) + '</span></div>'
+            : '<div class="bf-sugg none">לא נמצאה שום התאמה — בחרו ידנית.</div>';
+          return '<div class="bf-pend">' +
+            '<div><b>' + esc(p.raw_name) + '</b> <small style="color:var(--faint)">(כפי שהודבק)</small>' + hint +
+            '<div class="bf-brief-txt">' + esc(p.brief) + '</div></div>' +
+            '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+            '<select class="bf-pick" data-p="' + p.pending_id + '" style="min-width:170px">' + sel + '</select>' +
+            '<button class="btn small bf-assign" data-p="' + p.pending_id + '">שייך</button>' +
+            '<button class="btn ghost small bf-drop" data-p="' + p.pending_id + '">מחק</button>' +
+            '</div></div>';
+        }).join('')
+      : '<p class="hint-text">אין בריפים שממתינים לשיוך.</p>';
+
+    var rows = d.examinees.filter(function (e) { return !BF_ONLY_MISSING || !e.has_brief; }).map(function (e) {
+      return '<tr' + (e.left ? ' style="opacity:.5"' : '') + '>' +
+        '<td><b>' + esc(e.name) + '</b>' + (e.left ? ' <small style="color:var(--danger)">(עזב)</small>' : '') + '</td>' +
+        '<td style="text-align:center">' + (e.has_brief ? '<span class="ok">✓</span>' : '<span style="color:var(--warn)">⚑</span>') + '</td>' +
+        '<td><textarea class="bf-edit" data-c="' + esc(e.code) + '" style="min-height:44px;font-size:13px">' + esc(e.brief) + '</textarea></td>' +
+        '<td><button class="btn ghost small bf-save" data-c="' + esc(e.code) + '">שמור</button>' +
+        (e.has_brief ? ' <button class="btn ghost small bf-clear" data-c="' + esc(e.code) + '">נקה</button>' : '') + '</td></tr>';
+    }).join('');
+
+    m.innerHTML = '<div class="modal-card" style="max-width:920px">' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px"><h2 style="margin:0;font-size:20px">בקרת בריפים</h2>' +
+      '<span style="flex:1"></span>' +
+      '<button class="btn ghost small" id="bf-toggle">' + (BF_ONLY_MISSING ? 'הצג את כולם' : 'הצג רק מי שאין לו בריף') + '</button>' +
+      '<button class="btn ghost small" id="bf-x">סגור</button></div>' +
+      '<div class="save-sum">' +
+      '<span><small>יש בריף</small><b class="ok">' + d.with_brief + '</b></span>' +
+      '<span><small>אין בריף</small><b style="color:var(--warn)">' + d.without_brief + '</b></span>' +
+      '<span><small>ממתינים לשיוך</small><b style="color:' + ((d.pending || []).length ? 'var(--warn)' : 'inherit') + '">' + (d.pending || []).length + '</b></span>' +
+      '<span><small>שמות כפולים ביום</small><b style="color:' + ((d.duplicate_names || []).length ? 'var(--danger)' : 'inherit') + '">' + (d.duplicate_names || []).length + '</b></span>' +
+      '</div>' +
+      ((d.duplicate_names || []).length
+        ? '<div class="msg warn" style="margin-top:10px">יש שני נבחנים באותו שם: ' + esc(d.duplicate_names.join(', ')) + ' — שיוך בריף לפי שם אינו חד-משמעי, בדקו ידנית.</div>' : '') +
+      '<h3 style="font-size:15px;margin:16px 0 6px">בריפים שממתינים לשיוך</h3>' +
+      '<p class="hint-text">אלה שמות שלא התאימו בדיוק (גרשיים, אות סופית, שם אמצעי, טעות הקלדה). <b>המערכת לא משייכת לבד</b> — בחרו ואשרו.</p>' +
+      pendHtml +
+      '<h3 style="font-size:15px;margin:18px 0 6px">כל הנבחנים</h3>' +
+      '<div style="overflow-x:auto;max-height:340px;overflow-y:auto"><table class="grid"><thead><tr>' +
+      '<th>שם</th><th>בריף?</th><th>הבריף</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div id="bfc-msg" style="margin-top:10px"></div></div>';
+
+    document.getElementById('bf-x').onclick = function () { m.remove(); };
+    document.getElementById('bf-toggle').onclick = function () { BF_ONLY_MISSING = !BF_ONLY_MISSING; openBriefsControl(); };
+    m.querySelectorAll('.bf-assign').forEach(function (b) {
+      b.onclick = async function () {
+        var pid = b.getAttribute('data-p');
+        var code = m.querySelector('.bf-pick[data-p="' + pid + '"]').value;
+        if (!code) { document.getElementById('bfc-msg').innerHTML = '<div class="msg error">יש לבחור נבחן.</div>'; return; }
+        try { var r = await call('/examiner/assign-pending-brief', 'POST', { pending_id: Number(pid), code: code });
+          toast('הבריף שויך ל' + r.name + ' ✓'); openBriefsControl(); refresh();
+        } catch (e) { document.getElementById('bfc-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+      };
+    });
+    m.querySelectorAll('.bf-drop').forEach(function (b) {
+      b.onclick = async function () {
+        if (!confirm('למחוק את הבריף הממתין?')) return;
+        try { await call('/examiner/delete-pending-brief', 'POST', { pending_id: Number(b.getAttribute('data-p')) }); openBriefsControl(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+    m.querySelectorAll('.bf-save').forEach(function (b) {
+      b.onclick = async function () {
+        var code = b.getAttribute('data-c');
+        var txt = m.querySelector('.bf-edit[data-c="' + code + '"]').value;
+        try { await call('/examiner/set-examinee-brief', 'POST', { code: code, brief: txt }); toast('נשמר ✓'); openBriefsControl(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+    m.querySelectorAll('.bf-clear').forEach(function (b) {
+      b.onclick = async function () {
+        try { await call('/examiner/clear-brief', 'POST', { code: b.getAttribute('data-c') }); toast('הבריף נמחק'); openBriefsControl(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
   }
 
   async function autosplit() {
@@ -884,7 +1072,7 @@ window.AdminApp = (function () {
       (e.in_interview ? '<button class="btn" data-x="ireturn">חזר מריאיון</button>' : '<button class="btn ghost" data-x="iout">שלח לריאיון עכשיו</button>') +
       '<button class="btn ghost" data-x="add_time">הוסף 2 דקות</button>' +
       '<button class="btn ghost" data-x="reset_slot">אפס משבצת</button>' +
-      '<button class="btn ghost" data-x="reopen">פתח הגשה מחדש</button>' +
+      '<button class="btn ghost" data-x="reopen" title="נבחן שהגיש פרק בטעות — מחזיר אותו לפרק להמשך עבודה. הזמן שנשאר נשמר.">פתח הגשה מחדש</button>' +
       (e.left ? '<button class="btn ghost" data-x="unleft">החזר לפעילות</button>' : '<button class="btn ghost" data-x="left">סמן: עזב</button>') +
       '<button class="btn danger" data-x="remove">הסר נבחן</button>';
 
@@ -942,6 +1130,7 @@ window.AdminApp = (function () {
       meta + declHtml +
       '<div style="font-size:13px;color:var(--muted);margin-top:12px">מסלול</div><div class="timeline">' + (tl || '<span style="color:var(--faint)">—</span>') + '</div>' +
       '<div style="font-size:13px;color:var(--muted);margin-top:12px">טיפול פרטני (לא משפיע על שאר הכיתה)</div>' +
+      '<p class="hint-text" style="margin:2px 0 6px"><b>פתח הגשה מחדש</b> = נבחן שהגיש פרק בטעות חוזר לפרק ויכול להמשיך לענות (הזמן שנשאר נשמר).</p>' +
       '<div class="mc-actions">' + actions + '</div>' + fixHtml + briefHtml + '</div>';
     document.getElementById('card-close').onclick = closeCard;
     m.querySelectorAll('.mc-actions button, .mc-edit button, [data-x="edit"], [data-x="save_brief"]').forEach(function (b) { b.onclick = function () { cardAction(code, b.getAttribute('data-x')); }; });
@@ -1140,6 +1329,7 @@ window.AdminApp = (function () {
     await loadDays();
     loadInterviewers();
     renderBriefs();
+    renderDaySaves();
     refresh(); loadBackups();
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = setInterval(refresh, 3000);
