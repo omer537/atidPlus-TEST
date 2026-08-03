@@ -78,6 +78,8 @@ window.AdminApp = (function () {
       '<div id="readiness"></div>' +
       // מראיינים וחדרים
       '<div class="card"><div id="interviewers"></div></div>' +
+      // העלאת בריפים על המרואיינים
+      '<div class="card"><div id="briefs"></div></div>' +
       // קונסולת הסבב
       '<div class="card"><div id="console"></div></div>' +
       // לוח תכנון — מי בריאיון בכל אחד מ-5 הסבבים
@@ -155,12 +157,29 @@ window.AdminApp = (function () {
     renderAddSubjects();
   }
 
+  // הודעת אישור צפה — כדי שתמיד יהיה ברור שהפעולה נשמרה
+  function toast(msg, kind) {
+    var t = document.getElementById('exm-toast');
+    if (t && t.parentNode) t.remove();
+    t = document.createElement('div');
+    t.id = 'exm-toast';
+    t.textContent = msg;
+    var bg = kind === 'error' ? '#fb5c6b' : '#45b84e';
+    var fg = kind === 'error' ? '#fff' : '#04220a';
+    t.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:99999;background:' + bg +
+      ';color:' + fg + ';font-weight:700;padding:11px 22px;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.45);font-size:15px;transition:opacity .4s';
+    document.body.appendChild(t);
+    setTimeout(function () { if (t) t.style.opacity = '0'; }, 2200);
+    setTimeout(function () { if (t && t.parentNode) t.remove(); }, 2700);
+  }
+
   // ------------------------------------------------- הקמת יום הערכה
   var DAYS = { days: [], active_day_id: null, min_rounds: 3, max_rounds: 5 };
   async function loadDays() {
     try { DAYS = await call('/examiner/days'); } catch (e) { /* לא לשבור */ }
     renderDaySetup();
   }
+  // שורת שליטה קבועה: תמיד ברור באיזה יום עובדים ומה השלב שלו.
   function renderDaySetup() {
     var box = document.getElementById('day-setup'); if (!box) return;
     // הגנה: אם המנהל מקליד/בוחר כרגע בתוך הכרטיס — לא לרנדר מחדש (שלא יימחק לו)
@@ -168,65 +187,217 @@ window.AdminApp = (function () {
         /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
     var S = STATE || {};
     var day = S.day || null;
-    var phase = day ? day.phase : 'registration';
-    var n = day ? day.total_rounds : 5;
-    var subjCount = S.subject_count || Math.max(1, n - 2);
-    var opts = '';
-    for (var k = DAYS.min_rounds; k <= DAYS.max_rounds; k++) {
-      opts += '<option value="' + k + '"' + (k === n ? ' selected' : '') + '>' + k + ' סבבים</option>';
+    if (!day) {
+      box.innerHTML = '<div class="toolbar"><h2 class="section-title">יום הערכה</h2><span class="spacer"></span>' +
+        '<button class="btn small" id="btn-new-day">+ הקם יום הערכה</button></div>' +
+        '<p class="hint-text">עדיין לא הוקם יום הערכה. לחצו «הקם יום הערכה» כדי להתחיל.</p>';
+      document.getElementById('btn-new-day').onclick = openDayModal;
+      return;
     }
-    var dayOpts = DAYS.days.map(function (d) {
-      return '<option value="' + d.id + '"' + (d.id === DAYS.active_day_id ? ' selected' : '') + '>' +
-        esc(d.name) + ' (' + d.examinees + ' נבחנים)</option>';
-    }).join('');
-    var phases = [['registration', 'הרשמה בלבד'], ['open', 'המבחן פתוח'], ['running', 'באמצע היום']];
-    var phaseBtns = phases.map(function (p) {
-      return '<button class="btn ' + (p[0] === phase ? '' : 'ghost') + ' small ph-btn" data-ph="' + p[0] + '">' + p[1] + '</button>';
-    }).join('');
+    var phase = day.phase === 'open' ? 'open' : 'registration';
+    var n = day.total_rounds;
+    var subjCount = S.subject_count || Math.max(1, n - 2);
+    var started = (S.rounds || []).some(function (r) { return r.state !== 'planned'; });
+    var meta = DAYS.days.filter(function (d) { return d.id === day.id; })[0] || {};
+    var phaseChip = phase === 'open'
+      ? '<span class="dc-chip open">המבחן פתוח</span>'
+      : '<span class="dc-chip reg">הרשמה בלבד</span>';
 
     box.innerHTML =
-      '<div class="toolbar"><h2 class="section-title">הקם יום הערכה</h2><span class="spacer"></span>' +
-      '<button class="btn small" id="btn-new-day">+ יום הערכה חדש</button></div>' +
-      '<p class="hint-text">כל יום הערכה נשמר בנפרד — נתוני ימים קודמים לא נמחקים ולא מתערבבים. אפשר לשנות הכול תוך כדי.</p>' +
-      '<div class="day-grid">' +
-      '<label class="field" style="margin:0"><span>יום פעיל</span><select id="day-pick">' + dayOpts + '</select></label>' +
-      '<label class="field" style="margin:0"><span>שם היום (לשימוש שלך)</span><input id="day-name" type="text" value="' + esc(day ? day.name : '') + '"></label>' +
-      '<label class="field" style="margin:0"><span>כותרת לנבחן (בדף הכניסה)</span><input id="day-title" type="text" value="' + esc(day ? (day.title || '') : '') + '"></label>' +
-      '<label class="field" style="margin:0"><span>מספר סבבים</span><select id="day-rounds">' + opts + '</select></label>' +
+      // ── שורת השליטה ──
+      '<div class="day-ctl">' +
+      '<div class="dc-main"><span class="dc-label">מפעיל כרגע</span>' +
+      '<b class="dc-name">' + esc(day.name) + '</b>' + phaseChip + '</div>' +
+      '<div class="dc-stats">' +
+      '<span><small>נבחנים</small><b>' + (meta.examinees != null ? meta.examinees : (S.examinees || []).length) + '</b></span>' +
+      '<span><small>סבבים</small><b>' + n + '</b></span>' +
+      '<span><small>מקצועות לבחירה</small><b>' + subjCount + '</b></span>' +
+      (meta.created_at ? '<span><small>הוקם</small><b style="font-size:14px">' + fmtDay(meta.created_at) + '</b></span>' : '') +
       '</div>' +
-      '<p class="hint-text" id="rounds-explain">' + n + ' סבבים = <b>' + subjCount + ' ' + (subjCount === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. מינימום ' + DAYS.min_rounds + ' סבבים.</p>' +
-      '<div class="toolbar" style="margin-top:6px"><b style="font-size:14px">שלב היום:</b> ' + phaseBtns +
-      '<span class="spacer"></span><button class="btn small" id="btn-save-day">שמור שינויים</button></div>' +
-      '<p class="hint-text"><b>הרשמה בלבד</b> = הנבחנים נרשמים בבוקר ורואים רק «נרשמת בהצלחה» (בלי הצהרה ובלי מקצועות), ואת/ה ממיין/ת בינתיים. <b>המבחן פתוח</b> = הם ממשיכים להוראות, הצהרה ובחירת מקצועות.</p>' +
-      '<div id="day-msg"></div>';
+      '<div class="dc-actions">' +
+      '<button class="btn ghost small" id="btn-days-list">כל הימים (' + DAYS.days.length + ')</button>' +
+      '<button class="btn small" id="btn-new-day">+ הקם יום</button>' +
+      '</div></div>' +
 
-    document.getElementById('btn-new-day').onclick = createDay;
-    document.getElementById('btn-save-day').onclick = saveDay;
-    document.getElementById('day-pick').onchange = function () { switchDay(Number(this.value)); };
-    document.getElementById('day-rounds').onchange = function () {
-      var v = Number(this.value), sc = Math.max(1, v - 2);
-      document.getElementById('rounds-explain').innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. מינימום ' + DAYS.min_rounds + ' סבבים. <span style="color:var(--warn)">לחצו «שמור שינויים».</span>';
+      // ── שער המבחן ──
+      '<div class="day-gate">' +
+      (phase === 'registration'
+        ? '<div class="dg-text"><b>הנבחנים בשלב הרשמה.</b> הם נרשמים ורואים רק «נרשמת בהצלחה» — בלי הצהרה ובלי מקצועות. זה הזמן לשבץ ריאיונות, מראיינים וחדרים.</div>' +
+          '<button class="btn big" id="btn-open-exam">התחל מבחן ▶</button>'
+        : '<div class="dg-text"><b>המבחן פתוח.</b> הנבחנים רואים את ההוראות, ההצהרה ובחירת המקצועות. אחרי שכולם בחרו — «התחל סבב 1» למטה.</div>' +
+          '<button class="btn ghost small" id="btn-close-reg">חזור לשלב הרשמה</button>') +
+      '</div>' +
+
+      // ── עריכת פרטי היום ──
+      '<div class="day-grid">' +
+      '<label class="field" style="margin:0"><span>שם היום (לשימוש שלך)</span><input id="day-name" type="text" value="' + esc(day.name) + '"></label>' +
+      '<label class="field" style="margin:0"><span>כותרת לנבחן (בדף הכניסה)</span><input id="day-title" type="text" value="' + esc(day.title || '') + '"></label>' +
+      '<label class="field" style="margin:0"><span>מספר סבבים</span>' +
+      (started
+        ? '<input type="text" value="' + n + ' סבבים" disabled title="נקבע בהקמת היום">'
+        : (function () {
+            var o = '';
+            for (var k = DAYS.min_rounds; k <= DAYS.max_rounds; k++) o += '<option value="' + k + '"' + (k === n ? ' selected' : '') + '>' + k + ' סבבים</option>';
+            return '<select id="day-rounds">' + o + '</select>';
+          })()) +
+      '</label>' +
+      '<div style="display:flex;align-items:flex-end"><button class="btn small" id="btn-save-day">שמור שינויים</button></div>' +
+      '</div>' +
+      '<p class="hint-text" id="rounds-explain">' +
+      (started
+        ? '<b>מספר הסבבים נקבע בהקמת היום</b> ולא ניתן לשנותו אחרי שהמבחן התחיל (כדי לא לשבש נבחנים באמצע). לשיבוץ נבחן בודד לסבב שרץ — «כרטיס» → «קדם לפעילות הבאה».'
+        : n + ' סבבים = <b>' + subjCount + ' ' + (subjCount === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. אפשר לשנות עד שיתחיל הסבב הראשון.') +
+      '</p><div id="day-msg"></div>';
+
+    document.getElementById('btn-new-day').onclick = openDayModal;
+    document.getElementById('btn-days-list').onclick = openDaysList;
+    document.getElementById('btn-save-day').onclick = function () { saveDay(); };
+    var og = document.getElementById('btn-open-exam');
+    if (og) og.onclick = function () {
+      if (!confirm('להתחיל את המבחן?\n\nהנבחנים שנרשמו יעברו למסך ההוראות, ההצהרה ובחירת המקצועות.')) return;
+      saveDay({ phase: 'open' });
     };
-    box.querySelectorAll('.ph-btn').forEach(function (b) {
-      b.onclick = function () { saveDay({ phase: b.getAttribute('data-ph') }); };
+    var cg = document.getElementById('btn-close-reg');
+    if (cg) cg.onclick = function () {
+      if (!confirm('לחזור לשלב הרשמה?\n\nהנבחנים יראו שוב את מסך «נרשמת בהצלחה». אפשר רק לפני שהתחיל סבב.')) return;
+      saveDay({ phase: 'registration' });
+    };
+    var dr = document.getElementById('day-rounds');
+    if (dr) dr.onchange = function () {
+      var v = Number(this.value), sc = Math.max(1, v - 2);
+      document.getElementById('rounds-explain').innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' לבחירה</b> + פרק «מידע כללי» + ריאיון. <span style="color:var(--warn)">לחצו «שמור שינויים».</span>';
+    };
+  }
+  function fmtDay(ms) { try { return new Date(ms).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
+
+  // ------------------------------------------------- מודאל: הקמת יום
+  function openDayModal() {
+    var m = document.getElementById('day-modal');
+    if (!m) { m = el('<div class="modal-back" id="day-modal"></div>'); document.body.appendChild(m); }
+    m.onclick = function (ev) { if (ev.target === m) m.remove(); };
+    var opts = '';
+    for (var k = DAYS.min_rounds; k <= DAYS.max_rounds; k++) opts += '<option value="' + k + '"' + (k === 5 ? ' selected' : '') + '>' + k + ' סבבים</option>';
+    m.innerHTML = '<div class="modal-card" style="max-width:520px">' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px"><h2 style="margin:0;font-size:20px">הקמת יום הערכה</h2>' +
+      '<span style="flex:1"></span><button class="btn ghost small" id="dm-x">סגור</button></div>' +
+      '<p class="hint-text">היום החדש יהיה ריק ויהפוך ליום שאת/ה מפעיל/ה. <b>נתוני הימים הקודמים נשמרים במלואם</b> ולא נמחקים.</p>' +
+      '<label class="field"><span>שם היום (לשימוש שלך)</span><input id="dm-name" type="text" value="בחינת סיווג ' + new Date().toLocaleDateString('he-IL') + '"></label>' +
+      '<label class="field"><span>כותרת שהנבחן רואה בדף הכניסה</span><input id="dm-title" type="text" value="בחינת סיווג תשפ״ז"></label>' +
+      '<label class="field"><span>מספר סבבים</span><select id="dm-rounds">' + opts + '</select></label>' +
+      '<p class="hint-text" id="dm-explain"></p>' +
+      '<div id="dm-msg"></div>' +
+      '<div class="btn-row"><button class="btn" id="dm-go">צור יום</button>' +
+      '<button class="btn ghost" id="dm-cancel">ביטול</button></div></div>';
+    function explain() {
+      var v = Number(document.getElementById('dm-rounds').value), sc = Math.max(1, v - 2);
+      document.getElementById('dm-explain').innerHTML = v + ' סבבים = <b>' + sc + ' ' + (sc === 1 ? 'מקצוע' : 'מקצועות') + ' שהנבחן בוחר</b> + פרק «מידע כללי» (חובה לכולם) + ריאיון אישי.' +
+        '<br><span style="color:var(--muted)">שימו לב: מראיין אחד מראיין נבחן אחד בסבב, לכן צריך לפחות ⌈נבחנים ÷ ' + v + '⌉ מראיינים.</span>';
+    }
+    explain();
+    document.getElementById('dm-rounds').onchange = explain;
+    document.getElementById('dm-x').onclick = function () { m.remove(); };
+    document.getElementById('dm-cancel').onclick = function () { m.remove(); };
+    document.getElementById('dm-go').onclick = async function () {
+      var name = document.getElementById('dm-name').value.trim();
+      var title = document.getElementById('dm-title').value.trim();
+      var rounds = Number(document.getElementById('dm-rounds').value);
+      if (!name) { document.getElementById('dm-msg').innerHTML = '<div class="msg error">יש למלא שם ליום.</div>'; return; }
+      try {
+        await call('/examiner/create-day', 'POST', { name: name, title: title, total_rounds: rounds });
+        m.remove();
+        await loadDays(); await refresh(); loadInterviewers();
+        toast('נוצר יום «' + name + '» — והוא כעת היום הפעיל ✓');
+      } catch (e) { document.getElementById('dm-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+    };
+  }
+
+  // ------------------------------------------------- מודאל: כל הימים
+  async function openDaysList() {
+    await loadDays();
+    var m = document.getElementById('days-modal');
+    if (!m) { m = el('<div class="modal-back" id="days-modal"></div>'); document.body.appendChild(m); }
+    m.onclick = function (ev) { if (ev.target === m) m.remove(); };
+    var rows = DAYS.days.map(function (d) {
+      var isActive = d.id === DAYS.active_day_id;
+      var status = isActive ? '<span class="dc-chip open">מפעיל כרגע</span>'
+        : (d.status === 'closed' ? '<span class="dc-chip closed">סגור</span>' : '<span class="dc-chip">פתוח</span>');
+      return '<tr>' +
+        '<td><b>' + esc(d.name) + '</b>' + (d.title ? '<div style="font-size:12px;color:var(--muted)">' + esc(d.title) + '</div>' : '') + '</td>' +
+        '<td>' + fmtDay(d.created_at) + '</td>' +
+        '<td style="text-align:center">' + d.examinees + '</td>' +
+        '<td style="text-align:center">' + d.total_rounds + '</td>' +
+        '<td>' + status + '</td>' +
+        '<td class="dl-actions">' +
+        (isActive ? '' : '<button class="btn small dl-use" data-id="' + d.id + '">נהל</button>') +
+        '<button class="btn ghost small dl-xls" data-id="' + d.id + '">Excel</button>' +
+        '<button class="btn ghost small dl-json" data-id="' + d.id + '">JSON</button>' +
+        (d.status === 'closed'
+          ? '<button class="btn ghost small dl-open" data-id="' + d.id + '">פתח מחדש</button>'
+          : '<button class="btn ghost small dl-close" data-id="' + d.id + '">סגור יום</button>') +
+        '<button class="btn danger small dl-del" data-id="' + d.id + '" data-n="' + esc(d.name) + '">מחק</button>' +
+        '</td></tr>';
+    }).join('');
+    m.innerHTML = '<div class="modal-card" style="max-width:900px">' +
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px"><h2 style="margin:0;font-size:20px">כל ימי ההערכה</h2>' +
+      '<span style="flex:1"></span><button class="btn small" id="dl-new">+ הקם יום</button>' +
+      '<button class="btn ghost small" id="dl-x">סגור</button></div>' +
+      '<p class="hint-text">«נהל» מחליף את היום שאת/ה מפעיל/ה — <b>כל המסך מתחלף</b> (נבחנים, סבבים, ייצואים). ' +
+      '«סגור יום» מעביר לארכיון והנתונים נשארים נגישים במלואם. ' +
+      '«מחק» מוחק את נתוני היום — <b>אבל צילומי המצב במסך הבדיקה נשמרים</b>, כך שציונים שהופקו לא נעלמים.</p>' +
+      '<div style="overflow-x:auto"><table class="grid"><thead><tr>' +
+      '<th>שם היום</th><th>הוקם</th><th>נבחנים</th><th>סבבים</th><th>סטטוס</th><th>פעולות</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div><div id="dl-msg" style="margin-top:10px"></div></div>';
+
+    document.getElementById('dl-x').onclick = function () { m.remove(); };
+    document.getElementById('dl-new').onclick = function () { m.remove(); openDayModal(); };
+    m.querySelectorAll('.dl-use').forEach(function (b) {
+      b.onclick = function () { m.remove(); switchDay(Number(b.getAttribute('data-id'))); };
+    });
+    m.querySelectorAll('.dl-xls').forEach(function (b) {
+      b.onclick = function () { downloadBlob('/examiner/export-excel?day_id=' + b.getAttribute('data-id'), 'answers-day' + b.getAttribute('data-id') + '.xlsx').catch(function (e) { alert(e.message); }); };
+    });
+    m.querySelectorAll('.dl-json').forEach(function (b) {
+      b.onclick = function () { downloadBlob('/examiner/export-all?day_id=' + b.getAttribute('data-id'), 'day' + b.getAttribute('data-id') + '.json').catch(function (e) { alert(e.message); }); };
+    });
+    m.querySelectorAll('.dl-close').forEach(function (b) {
+      b.onclick = async function () {
+        if (!confirm('לסגור את היום?\n\nהוא יעבור לארכיון. הנתונים נשארים נגישים במלואם ותמיד אפשר לפתוח מחדש.')) return;
+        try { await call('/examiner/set-day-status', 'POST', { day_id: Number(b.getAttribute('data-id')), status: 'closed' }); openDaysList(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+    m.querySelectorAll('.dl-open').forEach(function (b) {
+      b.onclick = async function () {
+        try { await call('/examiner/set-day-status', 'POST', { day_id: Number(b.getAttribute('data-id')), status: 'open' }); openDaysList(); refresh(); }
+        catch (e) { alert(e.message); }
+      };
+    });
+    m.querySelectorAll('.dl-del').forEach(function (b) {
+      b.onclick = async function () {
+        var nm = b.getAttribute('data-n');
+        if (!confirm('למחוק את היום «' + nm + '»?\n\nיימחקו הנבחנים, התשובות, המשבצות והמראיינים של היום הזה.\nצילומי המצב במסך הבדיקה (ציונים) יישמרו.')) return;
+        if (!confirm('בטוח לגמרי? אי אפשר לבטל.\n\n(נוצר גיבוי אוטומטי לפני המחיקה.)')) return;
+        try {
+          var r = await call('/examiner/delete-day', 'POST', { day_id: Number(b.getAttribute('data-id')) });
+          await loadDays(); openDaysList(); refresh(); loadInterviewers();
+          toast('היום «' + nm + '» נמחק (' + r.removed_examinees + ' נבחנים)');
+        } catch (e) { document.getElementById('dl-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+      };
     });
   }
-  async function createDay() {
-    var name = prompt('שם ליום ההערכה החדש (לשימוש שלך):', 'יום הערכה ' + new Date().toLocaleDateString('he-IL'));
-    if (name === null) return;
-    var rounds = prompt('כמה סבבים ביום הזה? (3–5)', '5');
-    if (rounds === null) return;
-    if (!confirm('ליצור יום הערכה חדש?\n\nהיום החדש יהיה ריק ויהפוך לפעיל. הנתונים של הימים הקודמים נשמרים במלואם ולא נמחקים.')) return;
+
+  async function switchDay(id) {
     try {
-      await call('/examiner/create-day', 'POST', { name: name, total_rounds: Number(rounds) || 5 });
-      await loadDays(); refresh();
+      await call('/examiner/set-active-day', 'POST', { day_id: id });
+      await loadDays(); await refresh(); loadInterviewers();
+      var d = DAYS.days.filter(function (x) { return x.id === id; })[0];
+      toast('עברת לנהל את «' + (d ? d.name : 'היום') + '»');
     } catch (e) { alert(e.message); }
   }
-  async function switchDay(id) {
-    try { await call('/examiner/set-active-day', 'POST', { day_id: id }); await loadDays(); refresh(); loadInterviewers(); }
-    catch (e) { alert(e.message); }
-  }
   async function saveDay(extra) {
+    // חסינות: אם בטעות הועבר אירוע לחיצה (onclick = saveDay) — להתעלם ממנו
+    // ולקרוא את השדות מהמסך, אחרת השינויים לא נשמרים.
+    if (extra && (extra instanceof Event || extra.target || extra.currentTarget)) extra = null;
     var body = extra || {};
     if (!extra) {
       body.name = document.getElementById('day-name').value;
@@ -294,8 +465,21 @@ window.AdminApp = (function () {
     var box = document.getElementById('readiness'); if (!box) return;
     var R = S && S.readiness; if (!R) { box.innerHTML = ''; return; }
     var items = [];
-    var okAll = R.all_have_interview && R.all_have_interviewer && R.rounds_ok && !R.interviewers_without_room.length;
+    var okAll = R.all_have_interview && R.all_have_interviewer && R.rounds_ok &&
+      !R.interviewers_without_room.length && R.capacity_ok !== false && !(R.double_booked || []).length;
     items.push({ ok: R.rounds_ok, txt: 'מספר סבבים תקין (' + S.total_rounds + ')' });
+    // קיבולת מראיינים — מראיין אחד מראיין נבחן אחד בסבב
+    if (R.capacity != null) {
+      items.push({
+        ok: R.capacity_ok !== false,
+        txt: R.capacity_ok === false
+          ? 'אין מספיק מראיינים: ' + R.total + ' נבחנים ב-' + S.total_rounds + ' סבבים דורשים לפחות ' + R.needed_interviewers + ' מראיינים (יש ' + R.interviewers + ')'
+          : 'קיבולת מראיינים בסדר: ' + R.interviewers + ' מראיינים × ' + S.total_rounds + ' סבבים = ' + R.capacity + ' מקומות ל-' + R.total + ' נבחנים',
+      });
+    }
+    if ((R.double_booked || []).length) {
+      items.push({ ok: false, txt: 'חפיפת חדרים! אותו מראיין לשני נבחנים: ' + R.double_booked.join(' · ') });
+    }
     items.push({
       ok: R.all_have_interview,
       txt: 'שובצו לריאיון: ' + R.interview_assigned + ' מתוך ' + R.total,
@@ -308,6 +492,7 @@ window.AdminApp = (function () {
     });
     if (R.interviewers_without_room.length) items.push({ ok: false, txt: 'מראיינים בלי חדר: ' + R.interviewers_without_room.join(', ') });
     if (R.self_registered.length) items.push({ ok: false, warn: true, txt: 'נרשמו בשם שאינו ברשימה (לבדוק): ' + R.self_registered.join(', ') });
+    if ((R.no_subjects || []).length) items.push({ ok: false, warn: true, txt: 'טרם בחרו מקצועות (' + R.no_subjects.length + '): ' + R.no_subjects.slice(0, 8).join(', ') + (R.no_subjects.length > 8 ? ' ועוד…' : '') + ' — לא חוסם ריאיון' });
     box.innerHTML = '<div class="card readiness ' + (okAll ? 'ok' : '') + '">' +
       '<div class="rd-head">' + (okAll ? '<span class="rd-badge ok">הכול מוכן ✓</span>' : '<span class="rd-badge">בדיקת מוכנות</span>') + '</div>' +
       items.map(function (it) {
@@ -333,7 +518,7 @@ window.AdminApp = (function () {
     }).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--faint);padding:18px">אין מראיינים. הוסיפו למטה — כל מראיין יושב בחדר קבוע.</td></tr>';
     box.innerHTML =
       '<div class="toolbar"><h2 class="section-title">מראיינים וחדרים</h2><span class="spacer"></span>' +
-      '<span class="hint-text" style="margin:0">מראיין = חדר קבוע. הנבחן רואה את השם והחדר בזמן הריאיון.</span></div>' +
+      '<span class="hint-text" style="margin:0">מראיין = חדר קבוע. הנבחן רואה את השם והחדר בזמן הריאיון. <b>לאחר עריכת שם/חדר — לחצו «שמור».</b></span></div>' +
       '<table class="grid"><thead><tr><th>שם המראיין/ת</th><th>חדר</th><th>ריאיונות</th><th>פעולות</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px">' +
       '<div style="flex:1;min-width:240px"><b>הוספת מראיין</b>' +
@@ -344,30 +529,46 @@ window.AdminApp = (function () {
       '<p class="hint-text">שורה לכל מראיין: <span style="font-family:var(--mono)">שם, חדר</span></p>' +
       '<textarea id="iv-bulk" placeholder="רות מזרחי, חדר 101&#10;אבי דגן, חדר 102" style="min-height:90px"></textarea>' +
       '<button class="btn small" id="iv-bulk-add" style="margin-top:8px">הוסף רשימה</button></div>' +
-      '</div><div id="iv-msg" style="margin-top:10px"></div>';
+      '</div>' +
+      (IVS.length ? '<div class="btn-row" style="margin-top:12px"><button class="btn danger small" id="iv-clear">הסר את כל המראיינים</button></div>' : '') +
+      '<div id="iv-msg" style="margin-top:10px"></div>';
 
     document.getElementById('iv-add').onclick = async function () {
       var name = document.getElementById('iv-add-name').value.trim();
       var room = document.getElementById('iv-add-room').value.trim();
       if (!name) return;
-      try { await call('/examiner/add-interviewer', 'POST', { name: name, room: room }); loadInterviewers(); refresh(); }
-      catch (e) { document.getElementById('iv-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+      try {
+        await call('/examiner/add-interviewer', 'POST', { name: name, room: room });
+        toast('נוסף: ' + name + (room ? ' · ' + room : ''));
+        loadInterviewers(); refresh();
+      } catch (e) { document.getElementById('iv-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
     };
     document.getElementById('iv-bulk-add').onclick = async function () {
       var text = document.getElementById('iv-bulk').value;
       if (!text.trim()) return;
       try { var r = await call('/examiner/add-interviewers-bulk', 'POST', { text: text });
         document.getElementById('iv-msg').innerHTML = '<div class="msg info">נוספו ' + r.added + '.</div>';
+        toast('נוספו ' + r.added + ' מראיינים');
         document.getElementById('iv-bulk').value = ''; loadInterviewers(); refresh();
       } catch (e) { document.getElementById('iv-msg').innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+    };
+    var clr = document.getElementById('iv-clear');
+    if (clr) clr.onclick = async function () {
+      if (!confirm('להסיר את כל המראיינים של היום?\n\nהשיבוצים שלהם יתרוקנו (סימוני הריאיון בסבבים יישמרו).')) return;
+      if (!confirm('בטוח? אי אפשר לבטל.')) return;
+      try { var r = await call('/examiner/remove-all-interviewers', 'POST', {}); loadInterviewers(); refresh(); toast('הוסרו ' + r.removed + ' מראיינים'); }
+      catch (e) { alert(e.message); }
     };
     box.querySelectorAll('.iv-save').forEach(function (b) {
       b.onclick = async function () {
         var id = b.getAttribute('data-id');
         var name = box.querySelector('.iv-name[data-id="' + id + '"]').value;
         var room = box.querySelector('.iv-room[data-id="' + id + '"]').value;
-        try { await call('/examiner/edit-interviewer', 'POST', { id: Number(id), name: name, room: room }); loadInterviewers(); refresh(); }
-        catch (e) { alert(e.message); }
+        try {
+          await call('/examiner/edit-interviewer', 'POST', { id: Number(id), name: name, room: room });
+          toast('נשמר ✓ ' + name + (room ? ' · ' + room : ''));
+          loadInterviewers(); refresh();
+        } catch (e) { toast(e.message, 'error'); }
       };
     });
     box.querySelectorAll('.iv-del').forEach(function (b) {
@@ -377,6 +578,56 @@ window.AdminApp = (function () {
         catch (e) { alert(e.message); }
       };
     });
+  }
+
+  // ------------------------------------------------- העלאת בריפים
+  var BRIEF_PROMPT = 'מצורפת טבלה מאקסל עם נתונים על מועמדים לבחינת סיווג.\n' +
+    'החזר/י שורה אחת לכל מועמד, בפורמט המדויק הזה ובלי שום טקסט נוסף:\n' +
+    'שם מלא | בריף\n\n' +
+    'הבריף: עד שני משפטים, בעברית, שמסכמים מה שחשוב שהמראיין ידע לפני הריאיון ' +
+    '(רקע, נקודות חוזק, ועל מה כדאי לשים לב). בלי כותרות, בלי מספור, בלי שורות ריקות.';
+
+  function renderBriefs() {
+    var box = document.getElementById('briefs'); if (!box) return;
+    if (box.contains(document.activeElement) &&
+        /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    box.innerHTML =
+      '<div class="toolbar"><h2 class="section-title">בריפים למראיינים</h2><span class="spacer"></span>' +
+      '<button class="btn ghost small" id="bf-copy">העתק פרומפט לקלוד</button></div>' +
+      '<p class="hint-text">כל מראיין רואה בריף קצר על כל מי שהוא מראיין. הדרך המהירה: שלחו לקלוד את טבלת האקסל שלכם עם הפרומפט המוכן (כפתור «העתק פרומפט»), והדביקו כאן את התשובה.</p>' +
+      '<div class="bf-prompt" id="bf-prompt-box">' + esc(BRIEF_PROMPT).replace(/\n/g, '<br>') + '</div>' +
+      '<label class="field" style="margin-top:10px"><span>הדביקו כאן: שורה לכל נבחן — <span style="font-family:var(--mono)">שם | בריף</span> (עובד גם עם טאב או פסיק, והדבקה ישירה מאקסל)</span>' +
+      '<textarea id="bf-text" style="min-height:120px" placeholder="דנה לוי | מורה פרטית שנתיים, חזקה במתמטיקה. לבדוק התמודדות עם כיתה גדולה.&#10;יוסי כהן | רקע בהנדסה, בלי ניסיון הוראה. לבדוק סבלנות והנגשה."></textarea></label>' +
+      '<div class="btn-row"><button class="btn small" id="bf-go">עדכן בריפים</button></div>' +
+      '<div id="bf-msg" style="margin-top:10px"></div>';
+
+    document.getElementById('bf-copy').onclick = function () {
+      var done = function () { toast('הפרומפט הועתק — שלחו אותו לקלוד עם טבלת האקסל'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(BRIEF_PROMPT).then(done).catch(function () { selectPrompt(); });
+      } else selectPrompt();
+    };
+    function selectPrompt() {
+      var el2 = document.getElementById('bf-prompt-box');
+      if (!el2) return;
+      var rng = document.createRange(); rng.selectNodeContents(el2);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
+      toast('סמנו והעתיקו (Cmd+C)');
+    }
+    document.getElementById('bf-go').onclick = async function () {
+      var text = document.getElementById('bf-text').value;
+      var msg = document.getElementById('bf-msg');
+      if (!text.trim()) { msg.innerHTML = '<div class="msg error">אין מה לעדכן — הדביקו קודם.</div>'; return; }
+      try {
+        var r = await call('/examiner/set-briefs-bulk', 'POST', { text: text });
+        var html = '<div class="msg info">עודכנו ' + r.updated + ' בריפים.</div>';
+        if (r.notFound && r.notFound.length) html += '<div class="msg warn">שמות שלא נמצאו ביום הזה (' + r.notFound.length + '): ' + esc(r.notFound.join(', ')) + '</div>';
+        if (r.skipped && r.skipped.length) html += '<div class="msg warn">שורות שדולגו (' + r.skipped.length + '): ' + esc(r.skipped.join(' · ')) + '</div>';
+        msg.innerHTML = html;
+        toast('עודכנו ' + r.updated + ' בריפים ✓');
+        refresh();
+      } catch (e) { msg.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+    };
   }
 
   async function autosplit() {
@@ -888,6 +1139,7 @@ window.AdminApp = (function () {
     renderShell();
     await loadDays();
     loadInterviewers();
+    renderBriefs();
     refresh(); loadBackups();
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = setInterval(refresh, 3000);

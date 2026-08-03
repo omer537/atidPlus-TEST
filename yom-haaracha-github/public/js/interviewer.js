@@ -75,11 +75,14 @@ window.InterviewerApp = (function () {
     // הסבב הנוכחי — מתי התחיל ומתי מסתיים
     var cur = D.current;
     var curHtml;
+    var roomBig = iv.room
+      ? '<div class="iv-myroom"><span class="lbl">החדר שלך</span><b>' + esc(iv.room) + '</b></div>'
+      : '<div class="iv-myroom empty"><span class="lbl">החדר שלך</span><b>טרם הוגדר</b></div>';
     if (!D.running) {
-      curHtml = '<div class="iv-round-box"><div class="big">אין סבב פעיל</div><div class="sub">ממתינים שהמנהל יתחיל את הסבב הבא.</div></div>';
+      curHtml = roomBig + '<div class="iv-round-box"><div class="big">אין סבב פעיל</div><div class="sub">ממתינים שהמנהל יתחיל את הסבב הבא.</div></div>';
     } else {
       var leftSec = cur && cur.ends_at ? Math.max(0, Math.floor((cur.ends_at - D.server_now) / 1000)) : null;
-      curHtml = '<div class="iv-round-box"><div class="big">סבב ' + D.running + ' — פועל</div>' +
+      curHtml = roomBig + '<div class="iv-round-box"><div class="big">סבב ' + D.running + ' — פועל</div>' +
         '<div class="iv-times">' +
         '<span><small>התחיל</small><b>' + clock(cur && cur.started_at) + '</b></span>' +
         '<span><small>מסתיים</small><b>' + clock(cur && cur.ends_at) + '</b></span>' +
@@ -102,7 +105,8 @@ window.InterviewerApp = (function () {
             : (s.interviewed ? '<span class="pill done">הסתיים</span>'
               : (r.state === 'running' ? '<span class="pill chapter">עכשיו</span>' : '<span class="pill">ממתין</span>'));
           return '<div class="iv-person-row">' +
-            '<div class="iv-nm"><b>' + esc(s.name) + '</b>' + (s.left ? ' <small style="color:var(--danger)">(עזב)</small>' : '') + ' ' + badge + '</div>' +
+            '<div class="iv-nm"><b>' + esc(s.name) + '</b>' + (s.left ? ' <small style="color:var(--danger)">(עזב)</small>' : '') + ' ' + badge +
+            (iv.room ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">אצלך · ' + esc(iv.room) + '</div>' : '') + '</div>' +
             (s.brief ? '<div class="iv-brief">' + esc(s.brief) + '</div>' : '<div class="iv-brief empty">— אין בריף —</div>') +
             '<button class="btn ghost small iv-swap" data-r="' + r.round + '" data-c="' + esc(s.code) + '" data-n="' + esc(s.name) + '">בקש החלפה</button>' +
             '</div>';

@@ -116,7 +116,7 @@
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
 
-  var BRAND = '<div class="brand"><img class="logo" src="/img/logo.svg" alt="עתיד פלוס"><span class="wordmark">עתיד פלוס</span><span class="sub">יום הערכה</span></div>';
+  var BRAND = '<div class="brand"><img class="logo" src="/img/logo.svg" alt="עתיד פלוס"><span class="wordmark">עתיד פלוס</span><span class="sub">בחינת סיווג</span></div>';
 
   // ---------------------------------------------------------------- אתחול
   async function init() {
@@ -195,6 +195,10 @@
     var adminBtn = el('<button class="btn ghost small" id="admin-entry" style="position:fixed;top:16px;inset-inline-start:16px;z-index:50">כניסת מנהל</button>');
     root.appendChild(adminBtn);
     adminBtn.onclick = function () { if (window.AdminApp) window.AdminApp.enter(); };
+    // כניסת מראיין — מסך נפרד (/interviewer)
+    var ivBtn = el('<button class="btn ghost small" id="iv-entry" style="position:fixed;top:16px;inset-inline-start:126px;z-index:50">כניסת מראיין</button>');
+    root.appendChild(ivBtn);
+    ivBtn.onclick = function () { location.href = '/interviewer'; };
     document.getElementById('go').onclick = onLogin;
     document.getElementById('code').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLogin(); });
   }
