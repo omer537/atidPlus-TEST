@@ -13,7 +13,7 @@ window.GradeApp = (function () {
   var progressTimer = null;
 
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function rmath(s) { return (typeof window.renderMathText === 'function') ? window.renderMathText(String(s == null ? '' : s)) : esc(s); }
   function num(x) { return (x == null || isNaN(x)) ? '—' : Number(x).toFixed(1); }
 

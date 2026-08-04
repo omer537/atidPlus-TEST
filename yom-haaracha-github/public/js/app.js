@@ -70,6 +70,20 @@
     for (var i = App.outbox.length - 1; i >= 0; i--) if (App.outbox[i].k === k) return App.outbox[i].body.answer;
     return undefined;
   }
+  // 401 = הטוקן לא תקף יותר (נכנסו ממכשיר אחר / המנהל הסיר). זה **לא** תקלת רשת:
+  // הודעת «אין חיבור» הייתה נשארת לנצח והתשובות היו נשארות תקועות מקומית.
+  function handleAuthLost(msg) {
+    if (App.sessionLost) return true;
+    App.sessionLost = true;
+    try { localStorage.removeItem('yh_token'); } catch (e) {}
+    App.token = null;
+    if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+    App.view = 'login';
+    App.loginError = msg || 'החיבור שלך הוחלף (אולי נכנסת ממכשיר אחר). יש להתחבר שוב עם השם והקוד — התשובות שמורות.';
+    render();
+    return true;
+  }
+
   async function flushOutbox() {
     if (flushing || !App.token || !App.outbox.length) { updateNetStatus(); return; }
     flushing = true;
@@ -79,6 +93,7 @@
         try {
           await API.call('/save-answer', 'POST', item.body);
         } catch (e) {
+          if (e && e.status === 401) { flushing = false; handleAuthLost(); return; }
           App.online = false; updateNetStatus();
           setHint(item.body.item_id, 'אין רשת — התשובה נשמרה אצלך ותישלח אוטומטית', false);
           scheduleRetry();
@@ -114,7 +129,7 @@
 
   var root = document.getElementById('root');
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 
   var BRAND = '<div class="brand"><img class="logo" src="/img/logo.svg" alt="עתיד פלוס"><span class="wordmark">עתיד פלוס</span><span class="sub">בחינת סיווג</span></div>';
 
@@ -183,7 +198,7 @@
       '<p class="lead">' + (reg
         ? 'הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> שתזכרו, ולחצו «הרשמה לבחינה». זו רק הרשמה — המבחן עצמו ייפתח בהמשך, ואז תיכנסו שוב עם אותו שם ואותו קוד.'
         : 'הזינו <b>שם מלא</b> ובחרו <b>קוד אישי</b> משלכם כדי להתחיל. אם כבר התחלתם והתנתקתם — הזינו שוב את אותו שם ואותו קוד, ותחזרו בדיוק לאותה נקודה.') + '</p>' +
-      '<div id="err"></div>' +
+      '<div id="err">' + (App.loginError ? '<div class="msg warn">' + esc(App.loginError) + '</div>' : '') + '</div>' +
       '<label class="field"><span>שם מלא</span><input id="name" type="text" autocomplete="off" list="names-list" placeholder="ישראל ישראלי"></label>' + namesList +
       '<label class="field"><span>קוד אישי (בחירה חופשית)</span><input id="code" type="text" autocomplete="off" placeholder="לדוגמה: 4821"></label>' +
       '<div class="btn-row"><button class="btn" id="go">' + (reg ? 'הרשמה לבחינה' : 'כניסה / התחלה') + '</button></div>' +
@@ -213,6 +228,7 @@
   };
 
   async function onLogin() {
+    App.loginError = null; App.sessionLost = false;
     var name = document.getElementById('name').value.trim();
     var code = document.getElementById('code').value.trim();
     var errBox = document.getElementById('err');
@@ -441,7 +457,10 @@
       App.online = true;
       if (App.view === 'exam') renderExam();
       else if (App.view !== 'declaration' && App.view !== 'subjects' && App.view !== 'instructions') renderExam();
-    } catch (e) { App.online = false; updateNetStatus(); /* שגיאת רשת זמנית — התור ימשיך לנסות */ }
+    } catch (e) {
+      if (e && e.status === 401) return handleAuthLost();
+      App.online = false; updateNetStatus(); /* שגיאת רשת זמנית — התור ימשיך לנסות */
+    }
   }
 
   // ---------------------------------------------------------------- מסך המבחן

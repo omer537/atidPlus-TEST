@@ -11,7 +11,7 @@ window.InterviewerApp = (function () {
   var DATA = null;
 
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function two(n) { return String(n).padStart(2, '0'); }
   function clock(ms) { if (!ms) return '--:--'; var d = new Date(ms); return two(d.getHours()) + ':' + two(d.getMinutes()); }
   function fmtLeft(sec) {

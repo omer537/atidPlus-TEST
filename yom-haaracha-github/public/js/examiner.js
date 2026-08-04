@@ -13,7 +13,7 @@ window.AdminApp = (function () {
   var STATE = null;
 
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
-  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fmtTime(sec) { if (sec == null) return '--:--'; var m = String(Math.floor(sec / 60)).padStart(2, '0'), s = String(sec % 60).padStart(2, '0'); return m + ':' + s; }
 
   async function call(path, method, body, raw) {
@@ -939,7 +939,6 @@ window.AdminApp = (function () {
         (!e.setup ? '<small>טרם בחר מקצועות</small>' : '') + '</td>';
       var tds = e.cells.map(function (c) {
         if (!c) return '<td class="mx idle">—</td>';
-        var inner = c.label + (c.level ? ' <small style="opacity:.7">(' + esc(c.level) + ')</small>' : '');
         if (c.type === 'done') inner = '<span class="ck">✓</span> ' + esc(c.label);
         else inner = esc(c.label) + (c.level ? ' <small style="opacity:.7">' + esc(c.level) + '</small>' : '');
         var clickable = c.type !== 'idle';

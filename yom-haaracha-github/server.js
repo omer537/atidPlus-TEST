@@ -97,7 +97,8 @@ const getExamineeByCode = db.prepare('SELECT * FROM examinees WHERE code = ?');
 
 // נרמול שם להשוואת ייחודיות: מסיר רווחים בקצוות ומכווץ רווחים פנימיים כפולים.
 function normName(s) {
-  return String(s == null ? '' : s).trim().replace(/\s+/g, ' ');
+  // תקרה של 80 תווים — שם ארוך מדי היה שובר את טבלת המנהל ואת הייצוא
+  return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').slice(0, 80);
 }
 // חיפוש נבחן לפי שם (מנורמל) — השם הוא הזהות המחייבת. סריקה קטנה (~50 שורות).
 function findByName(name) {
@@ -140,6 +141,12 @@ function authInterviewer(req, res, next) {
   const id = interviewerTokens.get(token);
   const iv = db.prepare('SELECT * FROM interviewers WHERE id = ?').get(id);
   if (!iv) return res.status(401).json({ error: 'המראיין אינו קיים יותר.' });
+  // מראיין שייך ליום מסוים; אם המנהל עבר ליום אחר — לדרוש כניסה מחדש
+  // (אחרת המראיין רואה לו"ז ריק ולא מבין למה).
+  if (iv.day_id !== activeDayId()) {
+    interviewerTokens.delete(token);
+    return res.status(401).json({ error: 'היום הפעיל התחלף — יש להתחבר מחדש.' });
+  }
   req.interviewer = iv;
   next();
 }
@@ -202,6 +209,23 @@ function dayOfExaminee(ex) {
   return activeDay();
 }
 function isDayClosed(d) { return !!(d && d.status === 'closed'); }
+// ⚠ שליפת נבחן לפעולת מנהל — חייבת להיות מוגבלת ליום הפעיל. אחרת המנהל שעבר
+// לצפות ביום קודם והמסך טרם התרענן עלול למחוק/לשנות נבחן של יום אחר.
+function examineeOfActiveDay(code) {
+  // המרה בטוחה: code חסר/לא-סקלרי גרם ל-500 מ-node:sqlite במקום שגיאה מסבירה
+  const c = (code == null) ? '' : String(code);
+  if (!c) return { err: 400, msg: 'חסר קוד נבחן.' };
+  const ex = getExamineeByCode.get(c);
+  if (!ex) return { err: 404, msg: 'נבחן לא נמצא.' };
+  if (ex.day_id !== activeDayId()) return { err: 409, msg: 'הנבחן «' + ex.name + '» שייך ליום אחר. החליפו יום ונסו שוב.' };
+  return { ex: ex };
+}
+// כל מצב הנבחן נגזר מהיום *שלו* — אחרת החלפת/יצירת יום באמצע מבחן הייתה
+// מרוקנת את המסך של כל הנבחנים בזמן שהטיימרים ממשיכים לרוץ.
+function runningRoundOfDay(dayId) {
+  const row = db.prepare("SELECT MAX(round) AS r FROM day_rounds WHERE day_id = ? AND state = 'running'").get(dayId);
+  return row && row.r ? row.r : null;
+}
 
 // «המבחן הסתיים» ו«הודעת הסיום» הם מצב של *היום* — לא של המערכת כולה.
 function examEnded() {
@@ -384,8 +408,10 @@ function ensureSlotStarted(code, round) {
 
 // ---------- בניית מצב מלא לנבחן (לשחזור מדויק) ----------
 function buildExamineeState(ex) {
-  const running = currentRunningRound();
-  const total = totalRounds();
+  const exDayEarly = dayOfExaminee(ex);
+  const exDayId = exDayEarly ? exDayEarly.id : activeDayId();
+  const running = runningRoundOfDay(exDayId);
+  const total = exDayEarly ? exDayEarly.total_rounds : totalRounds();
   const state = {
     examinee: {
       name: ex.name,
@@ -398,7 +424,7 @@ function buildExamineeState(ex) {
   };
 
   // המבחן הסתיים על-ידי הבוחן, או שהיום נסגר (ארכיון) — לפי היום *של הנבחן*
-  const exDay = dayOfExaminee(ex);
+  const exDay = exDayEarly;
   if ((exDay && exDay.exam_ended) || isDayClosed(exDay)) {
     state.phase = 'ended';
     const m = exDay && exDay.finish_message != null ? String(exDay.finish_message).trim() : '';
@@ -406,8 +432,16 @@ function buildExamineeState(ex) {
     return state;
   }
 
+  // M9: נבחן שסומן «עזב» — מסך סיום, לא המתנה אינסופית לסבב הבא
+  if (ex.status === 'left') {
+    state.phase = 'ended';
+    const lm = exDay && exDay.finish_message != null ? String(exDay.finish_message).trim() : '';
+    state.message = lm || DEFAULT_FINISH_MSG;
+    return state;
+  }
+
   // שלב ההרשמה של הבוקר: נרשמנו — וממתינים. בלי חשיפה להוראות/הצהרה/מקצועות.
-  if (dayPhase() === 'registration') {
+  if ((exDay ? exDay.phase : dayPhase()) === 'registration') {
     state.phase = 'registered_waiting';
     state.message = 'ההרשמה נרשמה בהצלחה. נתראה בתחילת המבחן — אפשר לסגור את החלון ולחזור לכאן בהמשך.';
     return state;
@@ -423,7 +457,7 @@ function buildExamineeState(ex) {
 
   // יצא לריאיון (טיימר הפרק מושהה) — מסך ריאיון עד לחזרה
   if (ex.in_interview) {
-    const r = currentRunningRound();
+    const r = running;
     state.phase = 'interview';
     state.slot = Object.assign({ round: r, kind: 'interview' }, interviewWhere(ex.code, r));
     state.message = 'יצאת לריאיון — הטיימר מושהה. כשתחזור/י תמשיך/י בדיוק מהמקום.';
@@ -523,7 +557,9 @@ app.get('/api/day-info', (req, res) => {
 // רשימת השמות שהמנהל הזין ליום — לבחירה בהרשמת הבוקר (מונע כפילויות שמות).
 // מחזיר שמות בלבד (בלי קודים), ורק של מי שעדיין לא נרשם בפועל.
 app.get('/api/day-names', (req, res) => {
-  const rows = db.prepare('SELECT name, pin FROM examinees WHERE day_id = ? ORDER BY name').all(activeDayId());
+  // רק מי שעדיין לא נרשם בפועל (בלי token) — כדי שלא יהיה אפשר "לחטוף" שם
+  // של מי שכבר נכנס, במיוחד כשהרשימה הוזנה בלי קודים אישיים.
+  const rows = db.prepare("SELECT name FROM examinees WHERE day_id = ? AND (token IS NULL OR token = '') ORDER BY name").all(activeDayId());
   res.json({ names: rows.map((r) => r.name) });
 });
 
@@ -584,8 +620,16 @@ app.post('/api/register', (req, res) => {
     return res.json({ token, restored: true, state: buildExamineeState(getExamineeByCode.get(existing.code)) });
   }
 
-  const chosenSubjects = Array.isArray(subjects)
-    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, chosenSubjectCount()) : [];
+  const validSubjects = content.listSubjects();
+  const rawPicks = Array.isArray(subjects) ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT) : [];
+  // מקצוע שאינו בבנק היה נופל בשקט וגורם לכפילות פרק — עדיף לדחות במפורש
+  if (rawPicks.some((s) => validSubjects.indexOf(s) < 0)) {
+    return res.status(400).json({ error: 'אחד המקצועות שנבחרו אינו קיים במערכת. רעננו את הדף ובחרו מהרשימה.' });
+  }
+  if (math_level != null && String(math_level) !== '' && ['5', '4', '3'].indexOf(String(math_level)) < 0) {
+    return res.status(400).json({ error: 'רמת מתמטיקה חייבת להיות 5, 4 או 3.' });
+  }
+  const chosenSubjects = rawPicks.slice(0, chosenSubjectCount());
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
   if (schedule.chosenChapterCount(chosenSubjects, mathLevel, chosenSubjectCount()) < chosenSubjectCount()) {
@@ -609,8 +653,16 @@ app.post('/api/register', (req, res) => {
 // השלמת הרשמה לנבחן שנפתח לו משתמש מראש (בחירת מקצועות + הצהרה)
 app.post('/api/complete-setup', authExaminee, (req, res) => {
   const { subjects, math_level, declaration } = req.body || {};
-  const chosenSubjects = Array.isArray(subjects)
-    ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT).slice(0, chosenSubjectCount()) : [];
+  const validSubjects = content.listSubjects();
+  const rawPicks = Array.isArray(subjects) ? subjects.filter((s) => s && s !== schedule.GENERAL_SUBJECT) : [];
+  // מקצוע שאינו בבנק היה נופל בשקט וגורם לכפילות פרק — עדיף לדחות במפורש
+  if (rawPicks.some((s) => validSubjects.indexOf(s) < 0)) {
+    return res.status(400).json({ error: 'אחד המקצועות שנבחרו אינו קיים במערכת. רעננו את הדף ובחרו מהרשימה.' });
+  }
+  if (math_level != null && String(math_level) !== '' && ['5', '4', '3'].indexOf(String(math_level)) < 0) {
+    return res.status(400).json({ error: 'רמת מתמטיקה חייבת להיות 5, 4 או 3.' });
+  }
+  const chosenSubjects = rawPicks.slice(0, chosenSubjectCount());
   if (chosenSubjects.length === 0) return res.status(400).json({ error: 'יש לבחור לפחות מקצוע אחד.' });
   const ex = req.examinee;
   const mathLevel = chosenSubjects.includes('מתמטיקה') ? (math_level || '5') : null;
@@ -670,6 +722,14 @@ app.get('/api/state', authExaminee, (req, res) => {
 
 // שמירה אוטומטית של תשובה (idempotent — נקרא תדיר)
 app.post('/api/save-answer', authExaminee, (req, res) => {
+  // המרה בטוחה: ערכים לא-סקלריים גרמו ל-500 מ-node:sqlite
+  if (req.body) {
+    if (req.body.round != null) req.body.round = Number(req.body.round) || 0;
+    ['chapter_id', 'item_id', 'type'].forEach((k) => {
+      if (req.body[k] != null && typeof req.body[k] !== 'string') req.body[k] = String(req.body[k]);
+    });
+    if (req.body.answer != null && typeof req.body.answer !== 'string') req.body.answer = String(req.body.answer);
+  }
   const { round, chapter_id, item_id, type, answer, time_spent_sec, dont_know } = req.body || {};
   if (!chapter_id || !item_id) return res.status(400).json({ error: 'חסר מזהה פרק או פריט.' });
   const t = now();
@@ -886,7 +946,7 @@ app.get('/api/examiner/days', authExaminer, (req, res) => {
 app.post('/api/examiner/create-day', authExaminer, (req, res) => {
   const b = req.body || {};
   const name = normName(b.name) || ('יום הערכה ' + new Date().toLocaleDateString('he-IL'));
-  let n = Number(b.total_rounds) || 5;
+  let n = Math.round(Number(b.total_rounds)) || 5;
   n = Math.max(MIN_ROUNDS, Math.min(MAX_ROUNDS, n));
   const title = String(b.title || 'יום הערכה תשפ״ז').slice(0, 120);
   makeBackup('create-day');
@@ -916,7 +976,7 @@ app.post('/api/examiner/update-day', authExaminer, (req, res) => {
   if (!day) return res.status(400).json({ error: 'אין יום פעיל.' });
   try {
     if (b.total_rounds != null && Number(b.total_rounds) !== Number(day.total_rounds)) {
-      let n = Number(b.total_rounds);
+      let n = Math.round(Number(b.total_rounds));
       if (!(n >= MIN_ROUNDS && n <= MAX_ROUNDS)) {
         return res.status(400).json({ error: 'מספר הסבבים חייב להיות בין ' + MIN_ROUNDS + ' ל-' + MAX_ROUNDS + '. תנאי בסיס: פרק «מידע כללי», פרק מקצוע אחד לפחות, וריאיון.' });
       }
@@ -972,17 +1032,19 @@ app.post('/api/examiner/save-day', authExaminer, (req, res) => {
       db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'" + DAY_SCOPE).run(running, day.id);
       db.prepare("UPDATE day_rounds SET state = 'ended' WHERE day_id = ? AND round = ?").run(day.id, running);
     }
-    // 2) המבחן הסתיים (פר-יום) — כל הנבחנים רואים את מסך הסיום
-    setExamEnded(true);
-    // 3) הצילום הראשי לבדיקה
+    // 2) הצילום הראשי לבדיקה — **קודם**, כדי שכשל לא ישאיר את היום במצב חצי
+    //    (קודם סיימנו את המבחן ורק אז צילמנו; אם הצילום נכשל, כל הנבחנים היו
+    //    עוברים למסך סיום בלי שנשמר כלום).
     const snap = createSnapshot(day.name, { primary: true });
+    // 3) המבחן הסתיים (פר-יום) — כל הנבחנים רואים את מסך הסיום
+    setExamEnded(true);
     // 4) היום עובר לארכיון
     db.prepare("UPDATE days SET status = 'closed' WHERE id = ?").run(day.id);
     logEvent(null, 'save_day', day.name + ' → צילום #' + snap.cohort_id);
     res.json({
       ok: true, day_name: day.name, cohort_id: snap.cohort_id, cohort_name: snap.name,
       reused: snap.reused, examinees: snap.examinees, answers: snap.answers, teachItems: snap.teachItems,
-      ended_round: running || null,
+      zero_answers: snap.zero_answers || [], ended_round: running || null,
     });
   } catch (e) {
     res.status(e.status || 400).json({ error: e.message });
@@ -1017,7 +1079,10 @@ app.post('/api/examiner/set-day-status', authExaminer, (req, res) => {
   const d = db.prepare('SELECT * FROM days WHERE id = ?').get(id);
   if (!d) return res.status(404).json({ error: 'יום לא נמצא.' });
   const st = b.status === 'closed' ? 'closed' : 'open';
-  db.prepare('UPDATE days SET status = ? WHERE id = ?').run(st, id);
+  // ⚠ פתיחה מחדש חייבת לבטל גם «המבחן הסתיים» — אחרת היום נראה פתוח למנהל
+  // אבל כל הנבחנים (וכל מי שנרשם) ממשיכים לראות את מסך הסיום.
+  if (st === 'open') db.prepare("UPDATE days SET status = 'open', exam_ended = 0 WHERE id = ?").run(id);
+  else db.prepare("UPDATE days SET status = 'closed' WHERE id = ?").run(id);
   logEvent(null, 'day_status', d.name + ' → ' + st);
   res.json({ ok: true, status: st });
 });
@@ -1143,7 +1208,10 @@ app.post('/api/examiner/set-interview-plan', authExaminer, (req, res) => {
 // הסרת נבחן (שימושי לניקוי נבחני בדיקה)
 app.post('/api/examiner/remove-examinee', authExaminer, (req, res) => {
   const { code } = req.body || {};
-  if (!getExamineeByCode.get(code)) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  // ⚠ שומר יום: מחיקת נבחן של יום אחר בטעות תמחק גם את כל תשובותיו (CASCADE)
+  const _rg = examineeOfActiveDay(code);
+  if (_rg.err) return res.status(_rg.err).json({ error: _rg.msg });
+  makeBackup('pre-remove-examinee');
   db.prepare('DELETE FROM examinees WHERE code = ?').run(code); // slots + answers נמחקים ב-CASCADE
   logEvent(null, 'remove_examinee', code);
   res.json({ ok: true });
@@ -1181,7 +1249,7 @@ app.post('/api/examiner/edit-examinee', authExaminer, (req, res) => {
 // התחלת סבב — בונה חי לכל נבחן פעיל את המשבצת שלו (ריאיון לפי סימון, אחרת הפרק הבא)
 app.post('/api/examiner/start-round', authExaminer, (req, res) => {
   const r = Number((req.body || {}).round);
-  if (!r || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
+  if (!Number.isInteger(r) || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
   if (roundState(r) !== 'planned') return res.status(400).json({ error: 'הסבב כבר התחיל.' });
   if (r > 1 && roundState(r - 1) !== 'ended') return res.status(400).json({ error: `יש לסיים קודם את סבב ${r - 1}.` });
   const running = currentRunningRound();
@@ -1233,7 +1301,7 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
   db.prepare("UPDATE examinees SET interviewed = 1 WHERE day_id = ? AND code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(activeDayId(), r);
   // רשת ביטחון: נבחן שנשלח לריאיון-חי (in_interview) ולא הוחזר ידנית — בסיום הסבב נחשב כמי שהתראיין
   // ומשוחרר, כדי שלא ייתקע על מסך הריאיון בסבב הבא.
-  db.prepare("UPDATE examinees SET interviewed = 1, in_interview = 0 WHERE in_interview = 1").run();
+  db.prepare("UPDATE examinees SET interviewed = 1, in_interview = 0 WHERE in_interview = 1 AND day_id = ?").run(activeDayId());
   // גוגל שיטס: לדחוף את התשובות של מי שלא לחץ "הגש" *לפני* סגירת הסבב —
   // כך אף תשובה לא נעדרת מהגיליון, ובלי כפילויות (המוגשים כבר 'done' ונדחפו בהגשה).
   if (SHEETS_WEBHOOK_URL) {
@@ -1257,6 +1325,9 @@ app.post('/api/examiner/reset-round', authExaminer, (req, res) => {
   makeBackup('pre-reset-round');
   // ביטול סימון "התראיין" למי שהריאיון שלו היה בסבב הזה
   db.prepare("UPDATE examinees SET interviewed = 0 WHERE day_id = ? AND code IN (SELECT code FROM slots WHERE round = ? AND kind = 'interview')").run(activeDayId(), r);
+  // ⚠ וגם לשחרר את מי שהיה "בריאיון" — אחרת buildExamineeState בודק in_interview
+  // לפני המשבצת, והנבחן היה נשאר קפוא במסך הריאיון לכל שאר היום.
+  db.prepare('UPDATE examinees SET in_interview = 0 WHERE day_id = ? AND code IN (SELECT code FROM slots WHERE round = ?)').run(activeDayId(), r);
   db.prepare('DELETE FROM slots WHERE round = ?' + DAY_SCOPE).run(r, activeDayId());
   db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ? AND round = ?").run(activeDayId(), r);
   logEvent(null, 'reset_round', String(r));
@@ -1291,8 +1362,9 @@ app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
 
 // קידום נבחן בודד: משבץ אותו לסבב הרץ אם אין לו משבצת (למי שהצטרף מאוחר)
 app.post('/api/examiner/advance-examinee', authExaminer, (req, res) => {
-  const ex = getExamineeByCode.get((req.body || {}).code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay((req.body || {}).code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   const r = currentRunningRound();
   if (!r) return res.status(400).json({ error: 'אין סבב פעיל — התחל סבב תחילה.' });
   if (getSlot(ex.code, r)) return res.json({ ok: true, note: 'כבר משובץ בסבב הנוכחי.' });
@@ -1314,8 +1386,9 @@ app.post('/api/examiner/advance-examinee', authExaminer, (req, res) => {
 
 // יצא לריאיון — משהה את טיימר הפרק שלו (אם יש) ומסמן "בריאיון"
 app.post('/api/examiner/interview-out', authExaminer, (req, res) => {
-  const ex = getExamineeByCode.get((req.body || {}).code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay((req.body || {}).code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   db.prepare('UPDATE examinees SET in_interview = 1 WHERE code = ?').run(ex.code);
   const r = currentRunningRound();
   const slot = r ? getSlot(ex.code, r) : null;
@@ -1326,10 +1399,34 @@ app.post('/api/examiner/interview-out', authExaminer, (req, res) => {
   res.json({ ok: true });
 });
 
+// תיקון ידני של סימון «התראיין» — כדי שלחיצה בטעות תהיה הפיכה בקליק
+app.post('/api/examiner/set-interviewed', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const _g = examineeOfActiveDay(b.code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
+  if (ex.day_id !== activeDayId()) return res.status(409).json({ error: 'הנבחן שייך ליום אחר.' });
+  const v = b.value ? 1 : 0;
+  db.prepare('UPDATE examinees SET interviewed = ?, in_interview = 0 WHERE code = ?').run(v, ex.code);
+  logEvent(ex.code, 'set_interviewed', String(v));
+  res.json({ ok: true, interviewed: !!v });
+});
+
 // חזר מריאיון — מחדש את הטיימר, מסמן "התראיין"
 app.post('/api/examiner/interview-return', authExaminer, (req, res) => {
-  const ex = getExamineeByCode.get((req.body || {}).code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay((req.body || {}).code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
+  if (ex.day_id !== activeDayId()) return res.status(409).json({ error: 'הנבחן שייך ליום אחר. החליפו יום ונסו שוב.' });
+  const rNow = currentRunningRound();
+  const slotNow = rNow ? getSlot(ex.code, rNow) : null;
+  // ⚠ לסמן «התראיין» רק אם הוא באמת היה בריאיון — אחרת לחיצה בטעות על
+  // «חזר מריאיון» הייתה מסמנת אותו כמי שהתראיין, והוא לא היה מקבל ריאיון כלל.
+  const reallyWas = !!ex.in_interview || !!(slotNow && slotNow.kind === 'interview');
+  if (!reallyWas) {
+    db.prepare('UPDATE examinees SET in_interview = 0 WHERE code = ?').run(ex.code);
+    return res.json({ ok: true, warn: 'הנבחן לא היה בריאיון — לא סומן «התראיין». אם הוא כן התראיין, סמנו ידנית בכרטיס.' });
+  }
   db.prepare('UPDATE examinees SET in_interview = 0, interviewed = 1 WHERE code = ?').run(ex.code);
   const r = currentRunningRound();
   const slot = r ? getSlot(ex.code, r) : null;
@@ -1343,8 +1440,9 @@ app.post('/api/examiner/interview-return', authExaminer, (req, res) => {
 
 // פתיחת הגשה מחדש — מחזיר משבצת פרק שהוגשה למצב פעיל
 app.post('/api/examiner/reopen-submit', authExaminer, (req, res) => {
-  const ex = getExamineeByCode.get((req.body || {}).code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay((req.body || {}).code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   const r = currentRunningRound();
   const slot = r ? getSlot(ex.code, r) : null;
   if (!slot || slot.kind !== 'chapter') return res.status(400).json({ error: 'אין פרק להחזרה.' });
@@ -1355,9 +1453,10 @@ app.post('/api/examiner/reopen-submit', authExaminer, (req, res) => {
 
 // סימון שנבחן עזב (פטור) / החזרה לפעילות
 app.post('/api/examiner/set-left', authExaminer, (req, res) => {
-  const { code, left } = req.body || {};
-  const ex = getExamineeByCode.get(code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const { left } = req.body || {};
+  const _sg = examineeOfActiveDay(req.body && req.body.code);
+  if (_sg.err) return res.status(_sg.err).json({ error: _sg.msg });
+  const code = _sg.ex.code;
   db.prepare('UPDATE examinees SET status = ? WHERE code = ?').run(left ? 'left' : 'active', code);
   logEvent(code, left ? 'mark_left' : 'unmark_left', '');
   res.json({ ok: true });
@@ -1447,13 +1546,19 @@ app.post('/api/examiner/remove-all-interviewers', authExaminer, (req, res) => {
 // שיבוץ מראיין לריאיון של נבחן (בסבב מסוים). עובד גם בלייב.
 app.post('/api/examiner/assign-interviewer', authExaminer, (req, res) => {
   const b = req.body || {};
-  const ex = getExamineeByCode.get(b.code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay(b.code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   const r = Number(b.round);
   if (!r || r < 1 || r > totalRounds()) return res.status(400).json({ error: 'מספר סבב לא תקין.' });
   const ivId = b.interviewer_id ? Number(b.interviewer_id) : null;
   if (ivId && !db.prepare('SELECT id FROM interviewers WHERE id = ? AND day_id = ?').get(ivId, activeDayId())) {
     return res.status(404).json({ error: 'מראיין לא נמצא.' });
+  }
+  // ⚠ סבב שהסתיים כבר לא ניתן לשיבוץ — הריאיון לא יתקיים והמראיין יחכה לחינם.
+  const rState = roundState(r);
+  if (rState === 'ended') {
+    return res.status(400).json({ error: 'סבב ' + r + ' הסתיים — אי אפשר לשבץ אליו ריאיון. בחרו סבב שטרם התחיל.' });
   }
   // מראיין אחד = נבחן אחד בסבב. אחרת שני נבחנים נשלחים לאותו חדר באותו זמן.
   if (ivId) {
@@ -1565,8 +1670,9 @@ app.post('/api/examiner/delete-pending-brief', authExaminer, (req, res) => {
 });
 
 app.post('/api/examiner/clear-brief', authExaminer, (req, res) => {
-  const ex = getExamineeByCode.get((req.body || {}).code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay((req.body || {}).code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   db.prepare("UPDATE examinees SET interview_brief = '' WHERE code = ?").run(ex.code);
   res.json({ ok: true });
 });
@@ -1574,8 +1680,9 @@ app.post('/api/examiner/clear-brief', authExaminer, (req, res) => {
 // בריף קצר על נבחן — מה שהמראיין שלו יראה
 app.post('/api/examiner/set-examinee-brief', authExaminer, (req, res) => {
   const b = req.body || {};
-  const ex = getExamineeByCode.get(b.code);
-  if (!ex) return res.status(404).json({ error: 'נבחן לא נמצא.' });
+  const _g = examineeOfActiveDay(b.code);
+  if (_g.err) return res.status(_g.err).json({ error: _g.msg });
+  const ex = _g.ex;
   db.prepare('UPDATE examinees SET interview_brief = ? WHERE code = ?').run(String(b.brief || '').slice(0, 2000), ex.code);
   res.json({ ok: true });
 });
@@ -1592,6 +1699,9 @@ app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
   // משבצים גם סבב וגם מראיין, בלי חפיפות: מראיין אחד = נבחן אחד בסבב.
   // בונים לוח תפוסה (סבב → אילו מראיינים תפוסים) מהשיבוצים הקיימים.
   const ivs = db.prepare('SELECT id FROM interviewers WHERE day_id = ? AND active = 1 ORDER BY id').all(activeDayId()).map((v) => v.id);
+  if (!ivs.length) {
+    return res.status(400).json({ error: 'אין מראיינים ביום הזה. הוסיפו מראיינים (שם + חדר) לפני החלוקה האוטומטית.' });
+  }
   const taken = {};   // round -> Set(interviewer_id)
   const load = {};    // interviewer_id -> כמה ריאיונות כבר יש לו (לחלוקה מאוזנת)
   ivs.forEach((id) => { load[id] = 0; });
@@ -1612,6 +1722,8 @@ app.post('/api/examiner/autosplit-interviews', authExaminer, (req, res) => {
       const free = ivs.filter((id) => !taken[rd].has(id)).length;
       if (free > bestFree) { bestFree = free; bestRound = rd; }
     }
+    // אם אין מראיין פנוי באף סבב — מפזרים round-robin במקום לדחוס הכול לסבב הראשון
+    if (bestFree <= 0) bestRound = plannedRounds[assigned % plannedRounds.length];
     if (bestRound == null) break;
     db.prepare('INSERT OR IGNORE INTO interview_marks (round, code) VALUES (?, ?)').run(bestRound, ex.code);
     assigned++;
@@ -1820,16 +1932,24 @@ app.get('/api/examiner/matrix', authExaminer, (req, res) => {
 
 // עקיפות ידניות: הוספת זמן / השהיה / המשך / איפוס משבצת
 app.post('/api/examiner/override', authExaminer, (req, res) => {
-  const { code, round, action, seconds } = req.body || {};
+  const { round, action, seconds } = req.body || {};
+  const _og = examineeOfActiveDay(req.body && req.body.code);
+  if (_og.err) return res.status(_og.err).json({ error: _og.msg });
+  const code = _og.ex.code;
   const r = Number(round) || currentRunningRound();
-  const slot = getSlot(code, r);
+  const slot = r ? getSlot(code, r) : null;
   if (!slot) return res.status(404).json({ error: 'לא נמצאה משבצת.' });
   const t = now();
   switch (action) {
-    case 'add_time':
-      db.prepare('UPDATE slots SET duration_sec = duration_sec + ? WHERE code = ? AND round = ?')
-        .run(Number(seconds) || 60, code, r);
+    case 'add_time': {
+      // חסימה: שניות שליליות/ענקיות הרסו את הטיימר לחלוטין
+      let add = Math.round(Number(seconds));
+      if (!isFinite(add) || add === 0) add = 60;
+      add = Math.max(-3600, Math.min(3600, add));
+      db.prepare('UPDATE slots SET duration_sec = MAX(60, duration_sec + ?) WHERE code = ? AND round = ?')
+        .run(add, code, r);
       break;
+    }
     case 'pause':
       if (!slot.paused) db.prepare('UPDATE slots SET paused = 1, paused_at = ? WHERE code = ? AND round = ?').run(t, code, r);
       break;
@@ -2021,7 +2141,12 @@ function makeBackup(reason) {
     ensureBackupDir();
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
     // (1) גיבוי לוגי קריא (JSON) — עקבי תמיד
-    fs.writeFileSync(path.join(BACKUP_DIR, `backup-${ts}.json`), JSON.stringify(buildFullExport()));
+    // גיבוי JSON של *כל* הימים — לא רק הפעיל (אחרת גיבוי של יום קודם חסר)
+    const allDays = db.prepare('SELECT id, name FROM days ORDER BY id').all();
+    const bundle = allDays.length
+      ? allDays.map((d) => ({ day_id: d.id, day_name: d.name, examinees: buildFullExport(d.id) }))
+      : buildFullExport();
+    fs.writeFileSync(path.join(BACKUP_DIR, `backup-${ts}.json`), JSON.stringify(bundle));
     // (2) עותק פיזי של קובץ ה-DB (לשחזור מהיר) — אחרי איחוד ה-WAL
     try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); fs.copyFileSync(DB_PATH, path.join(BACKUP_DIR, `snapshot-${ts}.db`)); } catch (e) {}
     pruneBackups('backup-', 72);   // ~6 שעות בקצב של 5 דק'
@@ -2035,8 +2160,10 @@ function makeBackup(reason) {
 
 // הורדת כל התשובות כקובץ JSON (רשת ביטחון + מקור לבדיקת AI)
 app.get('/api/examiner/export-all', authExaminer, (req, res) => {
+  const jd = db.prepare('SELECT name FROM days WHERE id = ?').get(Number(req.query && req.query.day_id) || activeDayId());
+  const jsonName = jd ? ('answers-' + jd.name + '.json') : 'assessment-answers.json';
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="assessment-answers.json"');
+  setDownloadName(res, jsonName);
   res.send(JSON.stringify(buildFullExport(Number(req.query && req.query.day_id) || activeDayId()), null, 2));
 });
 
@@ -2062,6 +2189,14 @@ app.get('/api/examiner/backup/:name', authExaminer, (req, res) => {
 });
 
 // הורדת כל התשובות כקובץ אקסל (קריא, מוכן לבדיקה ידנית או לשליחה)
+// שם קובץ בכותרת HTTP חייב להיות ASCII (אחרת Node זורק ERR_INVALID_CHAR והבקשה
+// נכשלת ב-500). שולחים שם ASCII בטוח + גרסת UTF-8 תקנית שהדפדפן מעדיף.
+function setDownloadName(res, name) {
+  const ascii = String(name).replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_');
+  res.setHeader('Content-Disposition',
+    'attachment; filename="' + ascii + '"; filename*=UTF-8\'\'' + encodeURIComponent(name));
+}
+
 function buildAnswerRows(dayId) {
   const examinees = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId);
   const rows = [];
@@ -2138,7 +2273,7 @@ app.get('/api/examiner/export-excel', authExaminer, (req, res) => {
   }
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+  setDownloadName(res, filename);
   res.send(buf);
 });
 
@@ -2172,7 +2307,7 @@ app.get('/api/examiner/export-roster', authExaminer, (req, res) => {
   XLSX.utils.book_append_sheet(wb, ws, 'נבחנים');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="examinees-roster.xlsx"');
+  setDownloadName(res, 'examinees-roster.xlsx');
   res.send(buf);
 });
 
@@ -2303,10 +2438,12 @@ async function runGradingJob(cohortId, items, cfg, job) {
 function createSnapshot(name, opts) {
   opts = opts || {};
   const dayId = activeDayId();
+  // ⚠ כל הנבחנים של היום נכנסים לצילום — גם מי שלא ענה כלום (מסומן partial).
+  // אחרת נבחנים "נעלמים" מגיליון הציונים בלי שום התראה.
   const withAns = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId)
-    .map((ex) => ({ ex: ex, ans: db.prepare('SELECT * FROM answers WHERE code=? ORDER BY chapter_id,item_id').all(ex.code) }))
-    .filter((o) => o.ans.length > 0);
-  if (!withAns.length) throw Object.assign(new Error('אין נבחנים עם תשובות לצילום.'), { status: 400 });
+    .map((ex) => ({ ex: ex, ans: db.prepare('SELECT * FROM answers WHERE code=? ORDER BY chapter_id,item_id').all(ex.code) }));
+  if (!withAns.length) throw Object.assign(new Error('אין נבחנים ביום הזה לצילום.'), { status: 400 });
+  const zeroAnswers = withAns.filter((o) => o.ans.length === 0).map((o) => o.ex.name);
   const hashParts = withAns.map((o) => o.ex.code + ':' + o.ans.map((a) => a.item_id + '=' + (a.answer || '') + '#' + (a.updated_at || 0) + (a.dont_know ? 'd' : '')).join(','));
   const sourceHash = crypto.createHash('sha256').update(hashParts.join('|')).digest('hex').slice(0, 16);
   const existing = db.prepare('SELECT * FROM grading_cohorts WHERE source_hash=? ORDER BY id DESC').get(sourceHash);
@@ -2334,7 +2471,8 @@ function createSnapshot(name, opts) {
   withAns.forEach((o) => {
     const ex = o.ex;
     const include = lockedNames.has(normName(ex.name)) ? 0 : 1;
-    insEx.run(cohortId, ex.code, ex.name, ex.subjects || '[]', ex.math_level || null, ex.declaration || null, include, ex.status === 'left' ? 1 : 0);
+    insEx.run(cohortId, ex.code, ex.name, ex.subjects || '[]', ex.math_level || null, ex.declaration || null, include,
+      (ex.status === 'left' || o.ans.length === 0) ? 1 : 0);
     o.ans.forEach((a) => {
       let correct = null;
       if (gIsMc(a.type)) { const ok = content.isCorrectChoice(a.chapter_id, a.item_id, a.answer); correct = ok == null ? null : (ok ? 1 : 0); }
@@ -2346,7 +2484,8 @@ function createSnapshot(name, opts) {
   withAns.forEach((o) => computeAndStoreRollup(cohortId, o.ex.code, cfg));
   recomputeRanks(cohortId);
   const answersCount = withAns.reduce((n, o) => n + o.ans.length, 0);
-  return { cohort_id: cohortId, name: name, reused: false, examinees: withAns.length, answers: answersCount, teachItems: teachCount };
+  return { cohort_id: cohortId, name: name, reused: false, examinees: withAns.length, answers: answersCount,
+    teachItems: teachCount, zero_answers: zeroAnswers };
 }
 
 app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
@@ -2560,7 +2699,7 @@ app.get('/api/examiner/grading/export-sheet/:id', authExaminer, (req, res) => {
   XLSX.utils.book_append_sheet(wb, ws, 'ציונים');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', 'attachment; filename="grades-' + id + '.xlsx"');
+  setDownloadName(res, 'grades-' + id + '.xlsx');
   res.send(buf);
 });
 
@@ -2590,6 +2729,13 @@ app.get('/examiner', (req, res) => res.sendFile(path.join(__dirname, 'public', '
 app.get('/grade', (req, res) => res.sendFile(path.join(__dirname, 'public', 'grade.html')));
 app.get('/interviewer', (req, res) => res.sendFile(path.join(__dirname, 'public', 'interviewer.html')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// מטפל שגיאות גלובלי — כדי שתקלה לא תחזיר stack trace ונתיבי קבצים ללקוח
+app.use((err, req, res, next) => {
+  console.error('שגיאת שרת ב-' + req.method + ' ' + req.path + ':', err && err.message);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'שגיאת שרת. נסו שוב — ואם זה חוזר, צלמו מסך ופנו לתמיכה.' });
+});
 
 // בדיקת בריאות (ל-Render)
 app.get('/healthz', (req, res) => res.json({ ok: true, subjects: content.listSubjects().length }));
