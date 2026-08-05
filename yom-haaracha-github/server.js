@@ -77,7 +77,8 @@ function pushChapterAnswers(examinee, slot) {
   });
 }
 
-app.use(express.json({ limit: '1mb' }));
+// 8mb — קובץ ייבוא של יום שלם (28 נבחנים, 592 תשובות) שוקל ~0.4mb, עם מרווח נוח.
+app.use(express.json({ limit: '8mb' }));
 
 // ---------- כלי עזר ----------
 const now = () => Date.now();
@@ -2365,18 +2366,23 @@ function buildChaptersFor(cohortId, code) {
 }
 
 function computeAndStoreRollup(cohortId, code, cfg) {
-  const chapters = buildChaptersFor(cohortId, code);
-  const r = score.computeScores({ chapters: chapters }, cfg);
   const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, code);
-  const rec = score.buildRecommendation(r, { mathLevel: gx && gx.math_level, mathWeak: false });
+  const chapters = buildChaptersFor(cohortId, code);
+  // ⚠ רמת המתמטיקה נדרשת *בתוך* החישוב — היא קובעת את תקרת הבונוס (5/4/3 יח״ל).
+  const r = score.computeScores({ chapters: chapters, mathLevel: gx && gx.math_level }, cfg);
+  const rec = score.buildRecommendation(r, { partial: !!(gx && gx.partial) });
   const dom = JSON.stringify(r.domainsLabeled || {});
+  const crit = JSON.stringify(r.criteria || {});
+  const subj = JSON.stringify(r.perSubject || {});
+  // teaching_t = רב-מלל · content_c = המקצוע החזק · final_1to5 = הציון הסופי
+  const cols = 'domain_scores_json=?,content_c=?,teaching_t=?,final_1to5=?,breadth_bonus=?,top_domain=?,recommendation=?,bonus=?,bonus_from=?,criteria_json=?,subjects_json=?';
+  const vals = [dom, r.content, r.ravMelel, r.final, r.bonus, r.topDomain, rec, r.bonus, r.bonusLabel, crit, subj];
   const exists = db.prepare('SELECT 1 AS x FROM grading_rollups WHERE cohort_id=? AND code=?').get(cohortId, code);
   if (exists) {
-    db.prepare('UPDATE grading_rollups SET domain_scores_json=?,content_c=?,teaching_t=?,final_1to5=?,breadth_bonus=?,top_domain=?,recommendation=? WHERE cohort_id=? AND code=?')
-      .run(dom, r.content, r.teaching, r.final, r.breadthBonus, r.topDomain, rec, cohortId, code);
+    db.prepare('UPDATE grading_rollups SET ' + cols + ' WHERE cohort_id=? AND code=?').run(...vals, cohortId, code);
   } else {
-    db.prepare('INSERT INTO grading_rollups (cohort_id,code,domain_scores_json,content_c,teaching_t,final_1to5,breadth_bonus,top_domain,recommendation) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(cohortId, code, dom, r.content, r.teaching, r.final, r.breadthBonus, r.topDomain, rec);
+    db.prepare('INSERT INTO grading_rollups (cohort_id,code,domain_scores_json,content_c,teaching_t,final_1to5,breadth_bonus,top_domain,recommendation,bonus,bonus_from,criteria_json,subjects_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(cohortId, code, ...vals);
   }
   return r;
 }
@@ -2389,38 +2395,84 @@ function recomputeRanks(cohortId) {
   rows.forEach((r, i) => { upd.run(i + 1, n ? Math.round(((n - i) / n) * 100) : null, cohortId, r.code); });
 }
 function buildSheetRows(cohortId) {
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId) || {};
+  const dayLabel = cohort.day_label || cohort.name || '';
   return db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=?').all(cohortId).map((gx) => {
     const roll = db.prepare('SELECT * FROM grading_rollups WHERE cohort_id=? AND code=?').get(cohortId, gx.code) || {};
+    const domains = gSafeParse(roll.domain_scores_json, {});
+    const subjects = gSafeParse(roll.subjects_json, {});
+    // ⚠ ציון אינו תקף עד שכל תשובות הרב-מלל נוקדו. אחרת הגיליון מראה 5.0 לכולם
+    // (רק הרב-ברירה נספרה) וזה נראה כמו תוצאה אמיתית.
+    const tTot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=?').get(cohortId, gx.code).n;
+    const tDone = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND (ai_status='done' OR human_scores_json IS NOT NULL)").get(cohortId, gx.code).n;
     return {
-      code: gx.code, name: gx.name, include: !!gx.include_in_sheet, locked: !!gx.locked, partial: !!gx.partial,
-      final: roll.final_1to5, teaching: roll.teaching_t, content: roll.content_c,
-      domains: gSafeParse(roll.domain_scores_json, {}), topDomain: roll.top_domain, rank: roll.rank, percentile: roll.percentile,
+      code: gx.code, name: gx.name, day: dayLabel, cohortId: cohortId,
+      include: !!gx.include_in_sheet, locked: !!gx.locked, partial: !!gx.partial,
+      teachTotal: tTot, teachGraded: tDone, pending: tTot > tDone,
+      // ארבע העמודות שהוסכמו: ציון · רב-מלל · כמותי · אנגלית
+      final: roll.final_1to5,
+      ravMelel: roll.teaching_t,
+      quant: domains['כמותי'] != null ? domains['כמותי'] : null,
+      english: domains['אנגלית'] != null ? domains['אנגלית'] : null,
+      bonus: roll.bonus || 0,
+      bonusFrom: roll.bonus_from || '',
+      // לפני שהבדיקה רצה מוצגים שמות המקצועות בלי ציונים — ציון רב-ברירה בלבד מטעה.
+      subjectsLabel: score.subjectsLabel({ perSubject: subjects, subjectLevels: {}, mathLevel: gx.math_level }, tTot <= tDone),
+      subjects: subjects,
+      criteria: gSafeParse(roll.criteria_json, {}),
+      domains: domains, topDomain: roll.top_domain, rank: roll.rank, percentile: roll.percentile,
       recommendation: roll.recommendation || '', note: gx.note || '',
+      // תאימות לאחור למסכים שעדיין קוראים teaching/content
+      teaching: roll.teaching_t, content: roll.content_c,
     };
   }).sort((a, b) => (b.final || 0) - (a.final || 0));
 }
 
-// עבודת הרקע: בודקת פריטי «למד» שטרם נבדקו (resumable), 4 במקביל.
+// הקיבוץ לפי (פרק, שאלה) יושב ב-lib/aiGrade.js — לוגיקת בדיקה, לא לוגיקת שרת.
+const groupItemsByQuestion = aiGrade.groupItemsByQuestion;
+
+// עבודת הרקע: בודקת פריטי «למד» שטרם נבדקו (resumable), מקובצת לפי שאלה.
 async function runGradingJob(cohortId, items, cfg, job) {
-  const CONC = 4;
-  let idx = 0;
+  const CONC = 3;
+  const groups = groupItemsByQuestion(items, aiGrade.BATCH_SIZE);
+  job.groups = groups.length;
+  let gidx = 0;
   const affected = new Set();
+  const upd = db.prepare('UPDATE grading_items SET ai_scores_json=?, ai_conclusion=?, ai_attention=?, ai_confidence=?, ai_status=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?');
+
   async function worker() {
-    while (idx < items.length) {
-      const gi = items[idx++];
-      const a = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, gi.code, gi.chapter_id, gi.item_id);
-      const ch = content.getChapter(gi.chapter_id);
-      const item = ch && (ch.items || []).find((i) => i.id === gi.item_id);
+    while (gidx < groups.length) {
+      const group = groups[gidx++];
+      const first = group[0];
+      const ch = content.getChapter(first.chapter_id);
+      const item = ch && (ch.items || []).find((i) => i.id === first.item_id);
       const question = item ? (item.prompt || item.stem || '') : '';
       const sourceText = ch && ch.source ? (ch.source.text || ch.source.tex || '') : '';
-      let r;
+
+      // מפתח אטום a1…a8 — בלי שמות, שהזהות לא תשפיע על השיפוט.
+      const asked = group.map((gi, i) => {
+        const a = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?')
+          .get(cohortId, gi.code, gi.chapter_id, gi.item_id);
+        return { key: 'a' + (i + 1), gi: gi, answer: a ? a.answer : '', dontKnow: a ? !!a.dont_know : false };
+      });
+
+      let byKey = {};
       try {
-        r = await aiGrade.gradeTeachItem({ subject: ch ? ch.subject : '', sourceText: sourceText, question: question, answer: a ? a.answer : '', dontKnow: a ? !!a.dont_know : false }, cfg);
-      } catch (e) { r = { ok: false, criteria: {}, conclusion: 'שגיאה: ' + (e.message || ''), attention: '', confidence: 'low' }; }
-      db.prepare('UPDATE grading_items SET ai_scores_json=?, ai_conclusion=?, ai_attention=?, ai_confidence=?, ai_status=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?')
-        .run(JSON.stringify(r.criteria || {}), r.conclusion || '', r.attention || '', r.confidence || '', r.ok ? 'done' : 'failed', cohortId, gi.code, gi.chapter_id, gi.item_id);
-      affected.add(gi.code);
-      if (r.ok) job.done++; else job.failed++;
+        byKey = await aiGrade.gradeTeachBatch(
+          { subject: ch ? ch.subject : '', sourceText: sourceText, question: question },
+          asked.map((x) => ({ key: x.key, answer: x.answer, dontKnow: x.dontKnow })), cfg);
+      } catch (e) {
+        asked.forEach((x) => { byKey[x.key] = { ok: false, criteria: {}, conclusion: 'שגיאה: ' + (e.message || ''), attention: '', confidence: 'low' }; });
+      }
+
+      asked.forEach((x) => {
+        const r = byKey[x.key] || { ok: false, criteria: {}, conclusion: 'לא חזר ציון לפריט.', attention: 'יש לבדוק ידנית.', confidence: 'low' };
+        upd.run(JSON.stringify(r.criteria || {}), r.conclusion || '', r.attention || '', r.confidence || '',
+          r.ok ? 'done' : 'failed', cohortId, x.gi.code, x.gi.chapter_id, x.gi.item_id);
+        affected.add(x.gi.code);
+        if (r.ok) job.done++; else job.failed++;   // ההתקדמות נמדדת בפריטים, לא בקריאות
+      });
+      job.groupsDone = gidx;
     }
   }
   const workers = [];
@@ -2433,6 +2485,70 @@ async function runGradingJob(cohortId, items, cfg, job) {
   job.finishedAt = now();
 }
 
+// ============================================================
+//  יצירת מחזור בדיקה — ליבה משותפת לצילום מהיום החי ולייבוא מקובץ
+// ============================================================
+// rows = [{ ex:{code,name,subjects,math_level,declaration,status}, ans:[{chapter_id,item_id,type,answer,dont_know,updated_at}] }]
+// ⚠ שתי הדרכים חייבות לעבור כאן, כדי ש-`correct` יחושב באותה לוגיקה בדיוק
+// ושפריטי «למד» ייכנסו ל-grading_items בשתיהן.
+function insertCohortRows(name, rows, opts) {
+  opts = opts || {};
+  const dayId = (opts.dayId !== undefined) ? opts.dayId : activeDayId();
+  if (!rows.length) throw Object.assign(new Error('אין נבחנים לצילום.'), { status: 400 });
+
+  const zeroAnswers = rows.filter((o) => o.ans.length === 0).map((o) => o.ex.name);
+  const hashParts = rows.map((o) => o.ex.code + ':' + o.ans.map((a) => a.item_id + '=' + (a.answer || '') + '#' + (a.updated_at || 0) + (a.dont_know ? 'd' : '')).join(','));
+  const sourceHash = opts.sourceHash
+    || crypto.createHash('sha256').update(hashParts.join('|')).digest('hex').slice(0, 16);
+  const existing = db.prepare('SELECT * FROM grading_cohorts WHERE source_hash=? ORDER BY id DESC').get(sourceHash);
+  if (existing) {
+    // אותם נתונים בדיוק — לא מכפילים. אם ביקשו "ראשי", מסמנים את הקיים.
+    if (opts.primary && dayId != null) {
+      db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
+      db.prepare('UPDATE grading_cohorts SET is_primary = 1, day_id = ? WHERE id = ?').run(dayId, existing.id);
+    }
+    const cnt = db.prepare('SELECT COUNT(*) AS c FROM grading_answers WHERE cohort_id = ?').get(existing.id).c;
+    const tc = db.prepare('SELECT COUNT(*) AS c FROM grading_items WHERE cohort_id = ?').get(existing.id).c;
+    return { cohort_id: existing.id, name: existing.name, reused: true, examinees: rows.length, answers: cnt, teachItems: tc };
+  }
+
+  const lockedNames = new Set(db.prepare('SELECT name FROM grading_examinees WHERE locked=1').all().map((r) => normName(r.name)));
+  if (opts.primary && dayId != null) db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
+  const info = db.prepare('INSERT INTO grading_cohorts (name, created_at, source_hash, status, weights_json, day_id, is_primary, day_label) VALUES (?,?,?,?,?,?,?,?)')
+    .run(name, now(), sourceHash, 'open', JSON.stringify(score.CONFIG), dayId, opts.primary ? 1 : 0, opts.dayLabel || name);
+  const cohortId = Number(info.lastInsertRowid);
+
+  const insEx = db.prepare('INSERT INTO grading_examinees (cohort_id,code,name,subjects,math_level,declaration,include_in_sheet,partial) VALUES (?,?,?,?,?,?,?,?)');
+  const insAns = db.prepare('INSERT INTO grading_answers (cohort_id,code,chapter_id,item_id,type,answer,correct,dont_know) VALUES (?,?,?,?,?,?,?,?)');
+  const insItem = db.prepare('INSERT INTO grading_items (cohort_id,code,chapter_id,item_id,ai_status,status) VALUES (?,?,?,?,?,?)');
+  let teachCount = 0, answersCount = 0, skippedChapters = {};
+  rows.forEach((o) => {
+    const ex = o.ex;
+    const include = lockedNames.has(normName(ex.name)) ? 0 : 1;
+    insEx.run(cohortId, ex.code, ex.name, ex.subjects || '[]', ex.math_level || null, ex.declaration || null, include,
+      (ex.status === 'left' || o.ans.length === 0) ? 1 : 0);
+    const seen = new Set();
+    o.ans.forEach((a) => {
+      // פרק שאינו בבנק התוכן (שונה שם / נמחק) — לא ניתן לנקד אותו. מדלגים ומדווחים.
+      if (!content.getChapter(a.chapter_id)) { skippedChapters[a.chapter_id] = (skippedChapters[a.chapter_id] || 0) + 1; return; }
+      const key = a.chapter_id + '|' + a.item_id;
+      if (seen.has(key)) return;   // כפילות בקובץ מיובא
+      seen.add(key);
+      let correct = null;
+      if (gIsMc(a.type)) { const ok = content.isCorrectChoice(a.chapter_id, a.item_id, a.answer); correct = ok == null ? null : (ok ? 1 : 0); }
+      insAns.run(cohortId, ex.code, a.chapter_id, a.item_id, a.type, a.answer, correct, a.dont_know ? 1 : 0);
+      answersCount++;
+      if (gIsTeach(a.type)) { insItem.run(cohortId, ex.code, a.chapter_id, a.item_id, 'pending', 'pending'); teachCount++; }
+    });
+  });
+  const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
+  rows.forEach((o) => computeAndStoreRollup(cohortId, o.ex.code, cfg));
+  recomputeRanks(cohortId);
+  return { cohort_id: cohortId, name: name, reused: false, examinees: rows.length, answers: answersCount,
+    teachItems: teachCount, zero_answers: zeroAnswers,
+    skipped_chapters: Object.keys(skippedChapters).length ? skippedChapters : undefined };
+}
+
 // צילום-מצב: מעתיק עותק קפוא מהמערכת החיה למחזור בדיקה חדש (idempotent לפי source_hash).
 // מוצא כפונקציה כדי ש«שמור יום» יוכל להשתמש בו גם.
 function createSnapshot(name, opts) {
@@ -2440,53 +2556,58 @@ function createSnapshot(name, opts) {
   const dayId = activeDayId();
   // ⚠ כל הנבחנים של היום נכנסים לצילום — גם מי שלא ענה כלום (מסומן partial).
   // אחרת נבחנים "נעלמים" מגיליון הציונים בלי שום התראה.
-  const withAns = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId)
+  const rows = db.prepare('SELECT * FROM examinees WHERE day_id = ? ORDER BY created_at').all(dayId)
     .map((ex) => ({ ex: ex, ans: db.prepare('SELECT * FROM answers WHERE code=? ORDER BY chapter_id,item_id').all(ex.code) }));
-  if (!withAns.length) throw Object.assign(new Error('אין נבחנים ביום הזה לצילום.'), { status: 400 });
-  const zeroAnswers = withAns.filter((o) => o.ans.length === 0).map((o) => o.ex.name);
-  const hashParts = withAns.map((o) => o.ex.code + ':' + o.ans.map((a) => a.item_id + '=' + (a.answer || '') + '#' + (a.updated_at || 0) + (a.dont_know ? 'd' : '')).join(','));
-  const sourceHash = crypto.createHash('sha256').update(hashParts.join('|')).digest('hex').slice(0, 16);
-  const existing = db.prepare('SELECT * FROM grading_cohorts WHERE source_hash=? ORDER BY id DESC').get(sourceHash);
-  if (existing) {
-    // אותם נתונים בדיוק — לא מכפילים. אם ביקשו "ראשי", מסמנים את הקיים.
-    if (opts.primary) {
-      db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
-      db.prepare('UPDATE grading_cohorts SET is_primary = 1, day_id = ? WHERE id = ?').run(dayId, existing.id);
-    }
-    const cnt = db.prepare('SELECT COUNT(*) AS c FROM grading_answers WHERE cohort_id = ?').get(existing.id).c;
-    const tc = db.prepare('SELECT COUNT(*) AS c FROM grading_items WHERE cohort_id = ?').get(existing.id).c;
-    return { cohort_id: existing.id, name: existing.name, reused: true, examinees: withAns.length, answers: cnt, teachItems: tc };
-  }
-
-  const lockedNames = new Set(db.prepare('SELECT name FROM grading_examinees WHERE locked=1').all().map((r) => normName(r.name)));
-  if (opts.primary) db.prepare('UPDATE grading_cohorts SET is_primary = 0 WHERE day_id = ?').run(dayId);
-  const info = db.prepare('INSERT INTO grading_cohorts (name, created_at, source_hash, status, weights_json, day_id, is_primary) VALUES (?,?,?,?,?,?,?)')
-    .run(name, now(), sourceHash, 'open', JSON.stringify(score.CONFIG), dayId, opts.primary ? 1 : 0);
-  const cohortId = Number(info.lastInsertRowid);
-
-  const insEx = db.prepare('INSERT INTO grading_examinees (cohort_id,code,name,subjects,math_level,declaration,include_in_sheet,partial) VALUES (?,?,?,?,?,?,?,?)');
-  const insAns = db.prepare('INSERT INTO grading_answers (cohort_id,code,chapter_id,item_id,type,answer,correct,dont_know) VALUES (?,?,?,?,?,?,?,?)');
-  const insItem = db.prepare('INSERT INTO grading_items (cohort_id,code,chapter_id,item_id,ai_status,status) VALUES (?,?,?,?,?,?)');
-  let teachCount = 0;
-  withAns.forEach((o) => {
-    const ex = o.ex;
-    const include = lockedNames.has(normName(ex.name)) ? 0 : 1;
-    insEx.run(cohortId, ex.code, ex.name, ex.subjects || '[]', ex.math_level || null, ex.declaration || null, include,
-      (ex.status === 'left' || o.ans.length === 0) ? 1 : 0);
-    o.ans.forEach((a) => {
-      let correct = null;
-      if (gIsMc(a.type)) { const ok = content.isCorrectChoice(a.chapter_id, a.item_id, a.answer); correct = ok == null ? null : (ok ? 1 : 0); }
-      insAns.run(cohortId, ex.code, a.chapter_id, a.item_id, a.type, a.answer, correct, a.dont_know ? 1 : 0);
-      if (gIsTeach(a.type)) { insItem.run(cohortId, ex.code, a.chapter_id, a.item_id, 'pending', 'pending'); teachCount++; }
-    });
-  });
-  const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
-  withAns.forEach((o) => computeAndStoreRollup(cohortId, o.ex.code, cfg));
-  recomputeRanks(cohortId);
-  const answersCount = withAns.reduce((n, o) => n + o.ans.length, 0);
-  return { cohort_id: cohortId, name: name, reused: false, examinees: withAns.length, answers: answersCount,
-    teachItems: teachCount, zero_answers: zeroAnswers };
+  if (!rows.length) throw Object.assign(new Error('אין נבחנים ביום הזה לצילום.'), { status: 400 });
+  const day = db.prepare('SELECT name FROM days WHERE id=?').get(dayId);
+  return insertCohortRows(name, rows, { dayId: dayId, primary: opts.primary, dayLabel: (day && day.name) || name });
 }
+
+// ייבוא יום קודם מקובץ ה-JSON של «הורד את כל התשובות» (buildFullExport).
+// יום שלא נמצא בשרת יותר — כמו 2.8, שהמסד נוקה אחריו — נכנס לבדיקה מכאן.
+function importCohort(name, payload, opts) {
+  opts = opts || {};
+  const list = (payload && payload.examinees) || (Array.isArray(payload) ? payload : null);
+  if (!Array.isArray(list) || !list.length) {
+    throw Object.assign(new Error('הקובץ אינו בפורמט המצופה — חסר "examinees".'), { status: 400 });
+  }
+  const rows = list.map((e, i) => {
+    // הייצוא שומר את השם בשדה "examinee"; code_ref הוא גיבוי אם השם חסר.
+    const nm = normName(e.examinee || e.name || e.code_ref || ('נבחן ' + (i + 1)));
+    const subjects = Array.isArray(e.subjects) ? JSON.stringify(e.subjects) : (e.subjects || '[]');
+    const decl = (e.declaration && typeof e.declaration === 'object') ? JSON.stringify(e.declaration) : (e.declaration || null);
+    return {
+      ex: { code: String(e.code || ('imp' + i)), name: nm, subjects: subjects,
+        math_level: e.math_level != null ? String(e.math_level) : null, declaration: decl, status: e.status || 'active' },
+      ans: (e.answers || []).map((a) => ({
+        chapter_id: a.chapter_id, item_id: a.item_id, type: a.type,
+        answer: a.answer == null ? null : String(a.answer),
+        dont_know: a.dont_know ? 1 : 0,
+        updated_at: a.updated_at || 0,
+      })).filter((a) => a.chapter_id && a.item_id && a.type),
+    };
+  });
+  // חתימה על תוכן הקובץ — ייבוא חוזר של אותו קובץ לא ייצור מחזור כפול.
+  const sig = crypto.createHash('sha256')
+    .update('import:' + rows.map((r) => r.ex.name + '|' + r.ans.map((a) => a.chapter_id + a.item_id + (a.answer || '')).join(',')).join('||'))
+    .digest('hex').slice(0, 16);
+  const out = insertCohortRows(name, rows, { dayId: null, primary: false, dayLabel: opts.dayLabel || name, sourceHash: sig });
+  // שם שנראה כמו מספר טלפון או מספר זהות — הנבחן/ת הקליד/ה בשדה הלא נכון.
+  // עדיף לגלות את זה עכשיו ולא מול גיליון הציונים הסופי.
+  const suspicious = rows.map((r) => r.ex.name).filter((n) => /^[\d\-+ ]{6,}$/.test(n));
+  if (suspicious.length) out.suspicious_names = suspicious;
+  return out;
+}
+
+// ייבוא יום קודם מקובץ JSON (הקובץ שמורידים ב«הורד את כל התשובות»).
+app.post('/api/examiner/grading/import', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim() || ('יום מיובא ' + new Date().toLocaleDateString('he-IL'));
+  try {
+    const out = importCohort(name, b.data || b.payload || b, { dayLabel: String(b.day_label || name).trim() });
+    res.json(Object.assign({ ok: true, imported: true }, out));
+  } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
+});
 
 app.post('/api/examiner/grading/snapshot', authExaminer, (req, res) => {
   const name = String((req.body && req.body.name) || '').trim() || ('בדיקה ' + new Date().toLocaleDateString('he-IL'));
@@ -2519,7 +2640,16 @@ app.get('/api/examiner/grading/cohort/:id', authExaminer, (req, res) => {
     return { code: gx.code, name: gx.name, subjects: gSafeParse(gx.subjects, []), locked: !!gx.locked, include: !!gx.include_in_sheet, partial: !!gx.partial,
       teachTotal: tot, aiDone: done, reviewed: reviewed, final: roll.final_1to5, teaching: roll.teaching_t, content: roll.content_c, topDomain: roll.top_domain, rank: roll.rank };
   });
-  res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status, created_at: cohort.created_at }, examinees: examinees, demo: !aiGrade.hasApiKey(), job: gradingJobs[id] || null });
+  const failed = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='failed'").get(id).n;
+  res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status, created_at: cohort.created_at },
+    examinees: examinees, failed: failed, demo: !aiGrade.hasApiKey(), job: gradingJobs[id] || null });
+});
+
+// בדיקת חיבור — קריאה אחת זולה לפני שמשגרים עשרות. חובה לפני הרצה מלאה.
+app.get('/api/examiner/grading/test-key', authExaminer, async (req, res) => {
+  const cfg = aiGrade.loadConfig();
+  const r = await aiGrade.testKey(cfg);
+  res.json(Object.assign({ model: cfg.model, effort: cfg.effort }, r));
 });
 
 app.post('/api/examiner/grading/run-ai', authExaminer, (req, res) => {
@@ -2527,13 +2657,18 @@ app.post('/api/examiner/grading/run-ai', authExaminer, (req, res) => {
   const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
   if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
   if (gradingJobs[id] && gradingJobs[id].running) return res.json({ ok: true, already: true, job: gradingJobs[id] });
-  const pending = db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status!='done'").all(id);
+  // only_failed=true → «נסה שוב את מה שנכשל» בלבד, בלי לגעת במה שכבר נבדק.
+  const onlyFailed = !!(req.body && req.body.only_failed);
+  const pending = onlyFailed
+    ? db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status='failed'").all(id)
+    : db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status!='done'").all(id);
   if (!pending.length) return res.json({ ok: true, nothing: true, total: 0 });
-  const job = { total: pending.length, done: 0, failed: 0, running: true, startedAt: now() };
+  const groups = groupItemsByQuestion(pending, aiGrade.BATCH_SIZE).length;
+  const job = { total: pending.length, done: 0, failed: 0, running: true, startedAt: now(), groups: groups, groupsDone: 0 };
   gradingJobs[id] = job;
   const cfg = aiGrade.loadConfig();
   runGradingJob(id, pending, cfg, job).catch((e) => { job.running = false; job.error = String(e && e.message); });
-  res.json({ ok: true, started: true, total: pending.length, demo: !cfg.apiKey });
+  res.json({ ok: true, started: true, total: pending.length, groups: groups, demo: !cfg.apiKey });
 });
 
 app.get('/api/examiner/grading/progress/:id', authExaminer, (req, res) => {
@@ -2595,6 +2730,170 @@ app.get('/api/examiner/grading/examinee/:cohort/:code', authExaminer, (req, res)
     nav: { prev: pos > 0 ? order[pos - 1].code : null, next: pos < order.length - 1 ? order[pos + 1].code : null, index: pos + 1, count: order.length },
     demo: !aiGrade.hasApiKey(),
   });
+});
+
+// ============================================================
+//  בדיקה «לפי שאלה» — כל התשובות לאותה שאלה זו מתחת לזו
+// ============================================================
+// הרבה יותר מהיר ועקבי מלעבור נבחן-נבחן: העין מכיילת את עצמה על אותה שאלה
+// במקום לקפוץ בין מקצועות. גם תואם לאופן שבו ה-AI בדק (מקובץ לפי שאלה).
+
+// פריט «למד» q1t מזווג לרב-ברירה q1 (מוסכמה בבנק התוכן: אותו מספר + t).
+function mcPeerId(itemId) {
+  return /t$/.test(itemId) ? itemId.replace(/t$/, '') : null;
+}
+// האם הפריט דורש עין אנושית: ביטחון נמוך · ה-AI ביקש לשים לב · בדיקה נכשלה ·
+// או סתירה — ענה נכון ברב-ברירה אבל ההסבר שגוי (דיוק ≤2).
+// ⚠ במצב הדגמה כל הציונים מסומנים ביטחון נמוך, ולכן הכלל הזה מדלג — אחרת
+// כל 305 הפריטים היו מסומנים והמסנן היה מאבד את כל התועלת שלו.
+function itemNeedsAttention(gi, mcCorrect, demo) {
+  if (!gi) return false;
+  if (gi.ai_status === 'failed') return true;
+  if (!demo && gi.ai_confidence === 'low') return true;
+  if (String(gi.ai_attention || '').trim()) return true;
+  const eff = effectiveItemScores(gi);
+  if (mcCorrect === true && typeof eff.accuracy === 'number' && eff.accuracy <= 2) return true;
+  return false;
+}
+
+app.get('/api/examiner/grading/questions/:cohort', authExaminer, (req, res) => {
+  const cohortId = Number(req.params.cohort);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  const demo = !aiGrade.hasApiKey();
+  const rows = db.prepare('SELECT chapter_id, item_id, COUNT(*) AS n FROM grading_items WHERE cohort_id=? GROUP BY chapter_id, item_id').all(cohortId);
+  const questions = rows.map((r) => {
+    const ch = content.getChapter(r.chapter_id);
+    const item = ch && (ch.items || []).find((i) => i.id === r.item_id);
+    const items = db.prepare('SELECT * FROM grading_items WHERE cohort_id=? AND chapter_id=? AND item_id=?').all(cohortId, r.chapter_id, r.item_id);
+    const mcId = mcPeerId(r.item_id);
+    let attention = 0;
+    items.forEach((gi) => {
+      let mcCorrect = null;
+      if (mcId) {
+        const a = db.prepare('SELECT correct FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, gi.code, r.chapter_id, mcId);
+        if (a) mcCorrect = a.correct === 1;
+      }
+      if (itemNeedsAttention(gi, mcCorrect, demo)) attention++;
+    });
+    return {
+      chapter_id: r.chapter_id, item_id: r.item_id,
+      subject: ch ? ch.subject : r.chapter_id, level: ch ? ch.level : null,
+      archived: !!(ch && ch._archived),
+      question: item ? (item.prompt || item.stem || '') : '',
+      total: r.n,
+      aiDone: items.filter((gi) => gi.ai_status === 'done').length,
+      approved: items.filter((gi) => gi.status === 'approved').length,
+      attention: attention,
+    };
+  }).sort((a, b) => (a.subject || '').localeCompare(b.subject || '', 'he') || a.chapter_id.localeCompare(b.chapter_id) || a.item_id.localeCompare(b.item_id));
+  res.json({ cohort: { id: cohort.id, name: cohort.name }, questions: questions, demo: demo });
+});
+
+app.get('/api/examiner/grading/question/:cohort/:chapter/:item', authExaminer, (req, res) => {
+  const cohortId = Number(req.params.cohort);
+  const chapterId = req.params.chapter;
+  const itemId = req.params.item;
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  const ch = content.getChapter(chapterId);
+  const item = ch && (ch.items || []).find((i) => i.id === itemId);
+  const mcId = mcPeerId(itemId);
+  const mcItem = mcId && ch ? (ch.items || []).find((i) => i.id === mcId) : null;
+
+  const demo = !aiGrade.hasApiKey();
+  const gitems = db.prepare('SELECT * FROM grading_items WHERE cohort_id=? AND chapter_id=? AND item_id=?').all(cohortId, chapterId, itemId);
+  const answers = gitems.map((gi) => {
+    const gx = db.prepare('SELECT name, locked FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, gi.code) || {};
+    const a = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, gi.code, chapterId, itemId);
+    let mc = null;
+    if (mcId) {
+      const m = db.prepare('SELECT * FROM grading_answers WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?').get(cohortId, gi.code, chapterId, mcId);
+      if (m) {
+        let chosenText = m.answer;
+        if (mcItem && mcItem.options) {
+          const opt = mcItem.options.find((o) => o.id === m.answer);
+          if (opt) chosenText = opt.text || opt.tex || m.answer;
+        }
+        mc = { correct: m.correct === 1, chosen: chosenText, dontKnow: !!m.dont_know };
+      }
+    }
+    const eff = effectiveItemScores(gi);
+    return {
+      code: gi.code, name: gx.name || gi.code, examineeLocked: !!gx.locked,
+      answer: (a && a.answer) || '', dontKnow: !!(a && a.dont_know),
+      ai: gSafeParse(gi.ai_scores_json, {}), human: gSafeParse(gi.human_scores_json, null),
+      aiConclusion: gi.ai_conclusion || '', aiAttention: gi.ai_attention || '',
+      aiConfidence: gi.ai_confidence || '', aiStatus: gi.ai_status || 'pending',
+      note: gi.human_note || '', status: gi.status || 'pending',
+      mc: mc,
+      needsAttention: itemNeedsAttention(gi, mc ? mc.correct : null, demo),
+      // מיון לפי ציון ה-AI — כך רואים אם הסולם עקבי לאורך אותה שאלה
+      sortKey: (typeof eff.accuracy === 'number' ? eff.accuracy : 0) + (typeof eff.clarity === 'number' ? eff.clarity : 0),
+    };
+  }).sort((a, b) => b.sortKey - a.sortKey || (a.name || '').localeCompare(b.name || '', 'he'));
+
+  // ניווט בין שאלות באותו סדר של מסך הרשימה
+  const order = db.prepare('SELECT chapter_id, item_id FROM grading_items WHERE cohort_id=? GROUP BY chapter_id, item_id').all(cohortId)
+    .map((r) => Object.assign(r, { subject: (content.getChapter(r.chapter_id) || {}).subject || r.chapter_id }))
+    .sort((a, b) => (a.subject || '').localeCompare(b.subject || '', 'he') || a.chapter_id.localeCompare(b.chapter_id) || a.item_id.localeCompare(b.item_id));
+  const pos = order.findIndex((o) => o.chapter_id === chapterId && o.item_id === itemId);
+
+  res.json({
+    cohort: { id: cohort.id, name: cohort.name },
+    question: {
+      chapter_id: chapterId, item_id: itemId,
+      subject: ch ? ch.subject : chapterId, level: ch ? ch.level : null,
+      archived: !!(ch && ch._archived),
+      text: item ? (item.prompt || item.stem || '') : '',
+      source: ch && ch.source ? (ch.source.text || ch.source.tex || '') : '',
+      mcText: mcItem ? (mcItem.stem || mcItem.prompt || '') : '',
+      mcCorrectText: mcItem && mcItem.options ? ((mcItem.options.find((o) => o.correct) || {}).text || '') : '',
+    },
+    answers: answers,
+    criteria: score.CRITERION_LABEL, criteriaOrder: score.CRITERIA, axis: score.AXIS_OF,
+    nav: {
+      prev: pos > 0 ? order[pos - 1] : null,
+      next: pos >= 0 && pos < order.length - 1 ? order[pos + 1] : null,
+      index: pos + 1, count: order.length,
+    },
+    demo: demo,
+  });
+});
+
+// אישור קבוצתי — שאלה שלמה / נבחן שלם / מחזור שלם.
+// only_untouched=true (ברירת מחדל) מאשר רק פריטים שלא נגעו בהם, כדי שלחיצה
+// אחת לא תדרוס שיקול דעת אנושי שכבר הופעל.
+app.post('/api/examiner/grading/approve-bulk', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const cohortId = Number(b.cohort_id);
+  const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId);
+  if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
+  const onlyUntouched = b.only_untouched !== false;
+
+  let where = 'cohort_id=?', params = [cohortId];
+  if (b.scope === 'question') {
+    if (!b.chapter_id || !b.item_id) return res.status(400).json({ error: 'חסרים פרק ושאלה.' });
+    where += ' AND chapter_id=? AND item_id=?'; params.push(String(b.chapter_id), String(b.item_id));
+  } else if (b.scope === 'examinee') {
+    if (!b.code) return res.status(400).json({ error: 'חסר קוד נבחן.' });
+    where += ' AND code=?'; params.push(String(b.code));
+  } else if (b.scope !== 'cohort') {
+    return res.status(400).json({ error: 'scope חייב להיות question / examinee / cohort.' });
+  }
+  // ⚠ אין מה לאשר פריט שה-AI עוד לא בדק — אין ציון לאשר.
+  where += " AND ai_status='done'";
+  if (onlyUntouched) where += " AND status='pending' AND human_scores_json IS NULL";
+
+  const targets = db.prepare('SELECT code, chapter_id, item_id FROM grading_items WHERE ' + where).all(...params);
+  db.prepare("UPDATE grading_items SET status='approved' WHERE " + where).run(...params);
+  targets.forEach((t) => logGradeAudit(cohortId, t.code, t.chapter_id, t.item_id, 'status', 'pending', 'approved'));
+
+  const cfg = cohortConfig(cohort);
+  const codes = new Set(targets.map((t) => t.code));
+  codes.forEach((c) => { try { computeAndStoreRollup(cohortId, c, cfg); } catch (e) { /* לא לשבור */ } });
+  recomputeRanks(cohortId);
+  res.json({ ok: true, approved: targets.length });
 });
 
 app.post('/api/examiner/grading/item', authExaminer, (req, res) => {
@@ -2669,37 +2968,74 @@ app.get('/api/examiner/grading/sheet/:id', authExaminer, (req, res) => {
   res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status }, rows: buildSheetRows(id) });
 });
 
+// ארבע עמודות הציון שהוסכמו: ציון · רב-מלל · כמותי · אנגלית (+בונוס ומקצועות).
+// ⚠ נבחן שתשובות הרב-מלל שלו טרם נוקדו מקבל «טרם נבדק» ולא מספר — אחרת גיליון
+// לפני בדיקת ה-AI מציג 5.0 לכולם (רק הרב-ברירה נספרה) וזה נראה אמיתי.
+const SHEET_HEADER = ['שם', 'יום', 'ציון', 'רב-מלל', 'כמותי', 'אנגלית', 'בונוס', 'מקצועות',
+  'דירוג', 'אחוזון', 'המלצה', 'הערות בודק', 'מבחן חלקי'];
+const SHEET_COLS = [{ wch: 20 }, { wch: 12 }, { wch: 7 }, { wch: 8 }, { wch: 7 }, { wch: 8 }, { wch: 7 },
+  { wch: 34 }, { wch: 7 }, { wch: 8 }, { wch: 46 }, { wch: 24 }, { wch: 10 }];
+function sheetRowToExcel(r) {
+  const n = (v) => (v != null ? v : '');
+  const g = (v) => (r.pending ? 'טרם נבדק' : n(v));
+  return {
+    'שם': r.name,
+    'יום': r.day || '',
+    'ציון': g(r.final),
+    'רב-מלל': g(r.ravMelel),
+    'כמותי': g(r.quant),
+    'אנגלית': g(r.english),
+    'בונוס': r.pending ? '' : (r.bonus ? '+' + r.bonus.toFixed(2).replace(/0$/, '') : ''),
+    'מקצועות': r.subjectsLabel || '',
+    'דירוג': r.pending ? '' : (r.rank || ''),
+    'אחוזון': r.pending ? '' : n(r.percentile),
+    'המלצה': r.pending ? 'ממתין לבדיקת התשובות הכתובות' : (r.recommendation || ''),
+    'הערות בודק': r.note || '',
+    'מבחן חלקי': r.partial ? 'כן' : '',
+  };
+}
+function writeSheetBook(sheets) {
+  const wb = XLSX.utils.book_new();
+  sheets.forEach(function (s) {
+    const ws = XLSX.utils.json_to_sheet(s.rows.map(sheetRowToExcel), { header: SHEET_HEADER });
+    ws['!views'] = [{ RTL: true }];
+    ws['!cols'] = SHEET_COLS;
+    XLSX.utils.book_append_sheet(wb, ws, s.title.slice(0, 30));
+  });
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
 app.get('/api/examiner/grading/export-sheet/:id', authExaminer, (req, res) => {
   const id = Number(req.params.id);
   const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
   if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
   const all = req.query.all === '1';
   const rows = buildSheetRows(id).filter((r) => all || r.include);
-  const out = rows.map((r) => ({
-    'שם': r.name,
-    'ציון סופי': r.final != null ? r.final : '',
-    'הוראה': r.teaching != null ? r.teaching : '',
-    'תוכן': r.content != null ? r.content : '',
-    'כמותי': r.domains['כמותי'] != null ? r.domains['כמותי'] : '',
-    'מילולי': r.domains['מילולי'] != null ? r.domains['מילולי'] : '',
-    'אנגלית': r.domains['אנגלית'] != null ? r.domains['אנגלית'] : '',
-    'תחום מוביל': r.topDomain || '',
-    'דירוג': r.rank || '',
-    'אחוזון': r.percentile != null ? r.percentile : '',
-    'המלצה': r.recommendation || '',
-    'הערות בודק': r.note || '',
-    'מבחן חלקי': r.partial ? 'כן' : '',
-    'מחזור': cohort.name,
-  }));
-  const header = ['שם', 'ציון סופי', 'הוראה', 'תוכן', 'כמותי', 'מילולי', 'אנגלית', 'תחום מוביל', 'דירוג', 'אחוזון', 'המלצה', 'הערות בודק', 'מבחן חלקי', 'מחזור'];
-  const ws = XLSX.utils.json_to_sheet(out, { header: header });
-  ws['!views'] = [{ RTL: true }];
-  ws['!cols'] = [{ wch: 18 }, { wch: 9 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 7 }, { wch: 8 }, { wch: 42 }, { wch: 24 }, { wch: 10 }, { wch: 18 }];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'ציונים');
-  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  const buf = writeSheetBook([{ title: 'ציונים', rows: rows }]);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   setDownloadName(res, 'grades-' + id + '.xlsx');
+  res.send(buf);
+});
+
+// גיליון מאוחד לכמה ימים: גיליון לכל יום + גיליון «הכול» עם עמודת יום.
+// הדירוג והאחוזון נשארים *בתוך* כל יום — המבחנים לא זהים בין הימים.
+app.get('/api/examiner/grading/export-merged', authExaminer, (req, res) => {
+  const ids = String(req.query.cohorts || '').split(',').map((s) => Number(s.trim())).filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'לא נבחרו מחזורים.' });
+  const all = req.query.all === '1';
+  const sheets = [], everything = [];
+  for (const id of ids) {
+    const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+    if (!cohort) continue;
+    const rows = buildSheetRows(id).filter((r) => all || r.include);
+    sheets.push({ title: (cohort.day_label || cohort.name || ('מחזור ' + id)), rows: rows });
+    everything.push.apply(everything, rows);
+  }
+  if (!sheets.length) return res.status(404).json({ error: 'לא נמצאו מחזורים.' });
+  everything.sort((a, b) => (b.final || 0) - (a.final || 0));
+  const buf = writeSheetBook([{ title: 'הכול', rows: everything }].concat(sheets));
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  setDownloadName(res, 'grades-merged.xlsx');
   res.send(buf);
 });
 

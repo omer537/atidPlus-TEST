@@ -77,7 +77,10 @@
     App.sessionLost = true;
     try { localStorage.removeItem('yh_token'); } catch (e) {}
     App.token = null;
-    if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+    // ⚠ היה `pollHandle` בלי התחילית App. — הטיימר הוא App.pollHandle, ולכן
+    // בתוך 'use strict' עצם *הקריאה* זרקה ReferenceError. התוצאה: נבחן שהחיבור
+    // שלו הוחלף נשאר עם מסך תקוע — השורות שמחזירות אותו למסך הכניסה לא רצו.
+    if (App.pollHandle) { clearInterval(App.pollHandle); App.pollHandle = null; }
     App.view = 'login';
     App.loginError = msg || 'החיבור שלך הוחלף (אולי נכנסת ממכשיר אחר). יש להתחבר שוב עם השם והקוד — התשובות שמורות.';
     render();

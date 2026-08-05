@@ -279,6 +279,13 @@ for (const alter of [
   // צילום לבדיקה: מאיזה יום הוא בא, והאם הוא הצילום הראשי של אותו יום.
   'ALTER TABLE grading_cohorts ADD COLUMN day_id INTEGER',
   'ALTER TABLE grading_cohorts ADD COLUMN is_primary INTEGER NOT NULL DEFAULT 0',
+  // תווית יום לגיליון המאוחד — למחזור שיובא מקובץ ואין לו day_id חי.
+  'ALTER TABLE grading_cohorts ADD COLUMN day_label TEXT',
+  // מודל הניקוד: הבונוס על המקצוע, פרופיל 4 הקריטריונים, וציון לכל מקצוע.
+  'ALTER TABLE grading_rollups ADD COLUMN bonus REAL',
+  'ALTER TABLE grading_rollups ADD COLUMN bonus_from TEXT',
+  'ALTER TABLE grading_rollups ADD COLUMN criteria_json TEXT',
+  'ALTER TABLE grading_rollups ADD COLUMN subjects_json TEXT',
 ]) {
   try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
 }

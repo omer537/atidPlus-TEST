@@ -939,6 +939,9 @@ window.AdminApp = (function () {
         (!e.setup ? '<small>טרם בחר מקצועות</small>' : '') + '</td>';
       var tds = e.cells.map(function (c) {
         if (!c) return '<td class="mx idle">—</td>';
+        // ⚠ inner היה מוקצה בלי var — בתוך 'use strict' זה ReferenceError שהפיל
+        // את כל המטריצה, אבל רק מהרגע שלנבחן יש משבצת (כלומר כשהסבב מתחיל).
+        var inner;
         if (c.type === 'done') inner = '<span class="ck">✓</span> ' + esc(c.label);
         else inner = esc(c.label) + (c.level ? ' <small style="opacity:.7">' + esc(c.level) + '</small>' : '');
         var clickable = c.type !== 'idle';

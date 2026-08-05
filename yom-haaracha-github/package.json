@@ -15,6 +15,7 @@
     "rehearsal": "node scripts/rehearsal.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "express": "^4.19.2",
     "katex": "^0.16.11",
     "xlsx": "^0.18.5"

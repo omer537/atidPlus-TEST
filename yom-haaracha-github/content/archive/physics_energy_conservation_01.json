@@ -1,0 +1,76 @@
+{
+  "chapter_id": "physics_energy_conservation_01",
+  "subject": "פיזיקה",
+  "archetype": "prior_knowledge",
+  "level": null,
+  "topic": "שימור אנרגיה מכנית",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · ידע מוקדם · יחידות בעברית ללא לוכסן",
+  "display_title": "פיזיקה — שימור אנרגיה מכנית",
+  "source": {
+    "type": "function",
+    "text": "גוף שמסתו \\(m\\) משוחרר ממנוחה מגובה \\(h\\). מזניחים חיכוך והתנגדות אוויר. תאוצת הכובד היא \\(g\\)."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "מהי מהירות הגוף רגע לפני הפגיעה בקרקע?",
+      "options": [
+        { "id": "a", "tex": "v=\\sqrt{2gh}", "correct": true },
+        { "id": "b", "tex": "v=\\sqrt{gh}", "correct": false },
+        { "id": "c", "tex": "v=2gh", "correct": false },
+        { "id": "d", "tex": "v=2\\sqrt{gh}", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד במילים מדוע המסה \\(m\\) מצטמצמת מהחישוב, כלומר מדוע גוף כבד וגוף קל מגיעים לאותה מהירות (בהזנחת התנגדות אוויר).",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "כאשר הגוף מגיע לגובה \\(h/2\\), איזה חלק מהאנרגיה הכוללת הוא אנרגיה קינטית?",
+      "options": [
+        { "id": "a", "text": "חצי.", "correct": true },
+        { "id": "b", "text": "רבע.", "correct": false },
+        { "id": "c", "text": "הכול.", "correct": false },
+        { "id": "d", "text": "שליש.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד חושב שגוף כבד פוגע בקרקע לפני גוף קל \"כי הכובד מושך אותו חזק יותר\". זהה את הטעות והסבר במילים מדוע בהזנחת התנגדות האוויר שני הגופים נופלים באותו קצב.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "אם \\(h=5\\) מטר ו-\\(g=10\\) מטר לשנייה בריבוע, מהי מהירות הגוף רגע לפני הפגיעה?",
+      "options": [
+        { "id": "a", "text": "10 מטר לשנייה.", "correct": true },
+        { "id": "b", "text": "5 מטר לשנייה.", "correct": false },
+        { "id": "c", "text": "50 מטר לשנייה.", "correct": false },
+        { "id": "d", "text": "25 מטר לשנייה.", "correct": false }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים את עקרון שימור האנרגיה המכנית: מה נשמר לאורך הנפילה, ולאן עוברת האנרגיה הפוטנציאלית.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

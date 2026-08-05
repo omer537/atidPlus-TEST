@@ -253,6 +253,7 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
 .msg.error { background: rgba(251, 92, 107, 0.12); border: 1px solid rgba(251, 92, 107, 0.4); color: #ffc2c8; }
 .msg.info { background: rgba(35, 179, 164, 0.1); border: 1px solid var(--border-strong); color: var(--text); }
 .msg.warn { background: rgba(247, 183, 49, 0.1); border: 1px solid rgba(247, 183, 49, 0.35); color: #fde9b8; }
+.msg.ok { background: rgba(69, 184, 78, 0.12); border: 1px solid rgba(69, 184, 78, 0.4); color: #c9f0cd; }
 .hint-text { color: var(--faint); font-size: 13px; margin: 6px 0 0; line-height: 1.6; }
 
 .tex-err { color: var(--danger); font-family: var(--mono); font-size: 13px; }

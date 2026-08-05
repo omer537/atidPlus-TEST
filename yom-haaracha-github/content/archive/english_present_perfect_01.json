@@ -1,0 +1,78 @@
+{
+  "chapter_id": "english_present_perfect_01",
+  "subject": "אנגלית",
+  "archetype": "decode",
+  "level": null,
+  "topic": "present perfect מול past simple",
+  "planner_note": "15 דק' אמיתי · 20 בטיימר · פענוח — אין צורך בידע מוקדם",
+  "display_title": "אנגלית — present perfect מול past simple",
+  "source": {
+    "type": "rule",
+    "text": "Present perfect (have/has + past participle) מתאר פעולה הקשורה להווה: ניסיון בזמן לא מוגדר, או פעולה שהתחילה בעבר ונמשכת עד עכשיו. סמנים אופייניים: ever, never, already, yet, since, for. Past simple מתאר פעולה גמורה בזמן עבר מסוים. סמנים אופייניים: yesterday, ago, last week, in 2020."
+  },
+  "items": [
+    {
+      "id": "q1",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה משפט תקין?",
+      "options": [
+        { "id": "a", "text": "I saw him yesterday.", "correct": true },
+        { "id": "b", "text": "I have seen him yesterday.", "correct": false },
+        { "id": "c", "text": "I have saw him yesterday.", "correct": false },
+        { "id": "d", "text": "I seen him yesterday.", "correct": false }
+      ]
+    },
+    {
+      "id": "q1t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר לתלמיד במילים מתי משתמשים ב-present perfect ומתי ב-past simple, וכיצד מילת הזמן במשפט (למשל yesterday מול since) עוזרת להחליט.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q2",
+      "pair": "solve",
+      "type": "mc_apply",
+      "stem": "איזה משפט תקין (שים לב ל-for מול since)?",
+      "options": [
+        { "id": "a", "text": "She has lived here for three years.", "correct": true },
+        { "id": "b", "text": "She has lived here since three years.", "correct": false },
+        { "id": "c", "text": "She lives here for three years.", "correct": false },
+        { "id": "d", "text": "She living here for three years.", "correct": false }
+      ]
+    },
+    {
+      "id": "q2t",
+      "pair": "teach",
+      "type": "text_teach_error",
+      "answer_mode": "text_explanation",
+      "prompt": "תלמיד כתב: \"I have finished my homework yesterday.\" זהה את הטעות והסבר במילים כיצד לכוון את התלמיד לתיקון, בלי לתת לו את המשפט המתוקן ישירות.",
+      "rubric": ["identifies_error", "correctness", "clarity", "fit_to_student"]
+    },
+    {
+      "id": "q3",
+      "pair": "solve",
+      "type": "mc_error_dialogue",
+      "stem": "בשיחה הבאה יש שורה אחת שגויה. סמן אותה:",
+      "dialogue": [
+        { "speaker": "A", "line": "Have you ever been to Paris?" },
+        { "speaker": "B", "line": "Yes, I have been there in 2019." }
+      ],
+      "options": [
+        { "id": "a", "text": "השורה של A: \"Have you ever been to Paris?\"", "correct": false },
+        { "id": "b", "text": "השורה של B: \"Yes, I have been there in 2019.\"", "correct": true }
+      ]
+    },
+    {
+      "id": "q3t",
+      "pair": "teach",
+      "type": "text_teach",
+      "answer_mode": "text_explanation",
+      "prompt": "הסבר במילים מדוע השורה שגויה, וכיצד היית מכוון את הדובר לתיקון תוך כדי השיחה — בלי לתת לו את התשובה המתוקנת ישירות.",
+      "rubric": ["correctness", "clarity", "fit_to_student"]
+    }
+  ],
+  "variants": []
+}

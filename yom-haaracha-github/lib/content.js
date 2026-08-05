@@ -46,7 +46,33 @@ function load() {
       bySubject.get(subj).push(chapter);
     }
   }
+
+  loadArchive();
   return { byId, bySubject, problems };
+}
+
+// ---------- ארכיון: פרקים שירדו מהאוויר אבל נענו בימי הערכה שכבר היו ----------
+// ⚠ נכנסים ל-byId בלבד — כדי שהבדיקה תדע את נוסח השאלה ואת התשובה הנכונה —
+// ואף פעם לא ל-bySubject, כך שלא ייבחרו לנבחן במבחן חדש.
+// בלי זה, תשובות של נבחנים אמיתיים לפרקים שנמחקו נזרקות בשקט מהניקוד.
+function loadArchive() {
+  const dir = path.join(CONTENT_DIR, 'archive');
+  if (!fs.existsSync(dir)) return;
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.json'))) {
+    let chapter;
+    try {
+      chapter = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'));
+    } catch (e) {
+      problems.push({ file: 'archive/' + file, level: 'error', message: 'קובץ ארכיון שגוי: ' + e.message });
+      continue;
+    }
+    if (!chapter.chapter_id || byId.has(chapter.chapter_id)) continue;  // פרק חי גובר על ארכיון
+    chapter._file = 'archive/' + file;
+    chapter._archived = true;
+    chapter._valid = true;      // לא עובר שומר-סף: תפקידו רק לספק נוסח ותשובה נכונה לבדיקה
+    chapter._issues = [];
+    byId.set(chapter.chapter_id, chapter);
+  }
 }
 
 load();
