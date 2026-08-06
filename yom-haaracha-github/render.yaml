@@ -11,8 +11,20 @@ services:
     envVars:
       - key: EXAMINER_PASSWORD
         sync: false           # תגדיר/י סיסמת בוחן משלך בלוח הבקרה של Render
+      - key: INTERVIEWER_PASSWORD
+        sync: false           # סיסמת המראיינים (מסך /interviewer)
+      # ⚠ בלי המפתח הזה מסך הבדיקה עולה ב«מצב הדגמה» ונותן ציונים לפי אורך
+      # התשובה בלבד. חובה להגדיר בלוח הבקרה לפני שמריצים בדיקת AI.
+      - key: ANTHROPIC_API_KEY
+        sync: false
       - key: DB_PATH
         value: /var/data/assessment.db
+      # אופציונלי — ברירות המחדל הן claude-opus-5 ו-medium.
+      # ⚠ דווקא השמות האלה: CLAUDE_MODEL/CLAUDE_EFFORT נדרסים ע"י כלי פיתוח אחרים.
+      # - key: GRADING_MODEL
+      #   value: claude-opus-5
+      # - key: GRADING_EFFORT
+      #   value: medium
     disk:
       name: data              # דיסק קבוע — כדי שהנתונים ישרדו הפעלה מחדש
       mountPath: /var/data

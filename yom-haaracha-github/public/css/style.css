@@ -247,6 +247,12 @@ textarea { min-height: 120px; resize: vertical; line-height: 1.7; }
 .big-state .glyph svg { width: 38px; height: 38px; stroke: #06231f; }
 .big-state h2 { font-size: 26px; }
 .big-state p { color: var(--muted); font-size: 16px; max-width: 480px; margin: 8px auto 0; }
+/* ספירה לאחור עד הפרק הבא — במסך «הפרק הוגש»/«ממתינים» */
+.round-wait { display: inline-block; margin: 22px auto 0; padding: 14px 34px;
+  background: rgba(35,179,164,0.10); border: 1px solid var(--teal); border-radius: 14px; }
+.round-wait .lbl { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.round-wait b { font-size: 40px; font-weight: 800; color: #fff; font-family: var(--mono); line-height: 1.1; }
+.round-wait .note { display: block; font-size: 12px; color: var(--warn); margin-top: 6px; min-height: 1em; }
 
 /* ---------- הודעות ---------- */
 .msg { padding: 12px 16px; border-radius: 12px; font-size: 14px; margin-bottom: 16px; }
@@ -348,6 +354,11 @@ tr.left-row td { opacity: 0.5; }
 .round-chip.running small { color: var(--accent-1); }
 .round-chip.ended { border-color: var(--ok); background: rgba(69,184,78,0.1); }
 .round-chip.ended small { color: var(--ok); }
+/* שעון הסבב במסך המנהל — אותה שפה ויזואלית של .iv-times במסך המראיין */
+.round-clock { margin: 14px 0 2px; }
+.round-clock .iv-times { margin-top: 0; }
+.round-clock.paused .iv-times b { color: var(--warn); }
+.round-clock b.over { color: var(--danger); }
 .two-lists { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
 .list-col { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; background: rgba(8,14,36,0.3); }
 .list-head { font-weight: 700; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
@@ -370,6 +381,7 @@ tr.left-row td { opacity: 0.5; }
 .round-plan .rp-names { display: flex; flex-wrap: wrap; gap: 5px; }
 .chip-name { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
   background: rgba(35, 179, 164, 0.12); color: var(--accent-1); border: 1px solid var(--border-strong); }
+.chip-name.done { background: rgba(69, 184, 78, 0.14); color: var(--ok); border-color: var(--ok); }
 
 .step-dots { display: flex; gap: 8px; margin-bottom: 20px; }
 .step-dots i { width: 26px; height: 4px; border-radius: 2px; background: var(--border); }
@@ -592,8 +604,41 @@ tr.gr-locked td { background: rgba(69,184,78,0.05); }
 .iv-person-row { display: grid; grid-template-columns: minmax(140px, 1fr) 2fr auto; gap: 12px;
   align-items: center; padding: 8px 0; border-top: 1px solid var(--border); }
 .iv-person-row:first-of-type { border-top: 0; }
-.iv-brief { font-size: 13px; color: var(--muted); line-height: 1.6; }
+/* ⚠ בלי min-width:0 טקסט בריף ארוך מרחיב את עמודת הגריד ודוחף את השורה
+   מחוץ לכרטיס (זה מה ששבר את המסך בטלפון). */
+.iv-brief { font-size: 13px; color: var(--muted); line-height: 1.6; min-width: 0; overflow-wrap: anywhere; }
 .iv-brief.empty { color: var(--faint); font-style: italic; }
+.iv-times b.over { color: var(--danger); }
+/* פאנל «בקש החלפה» — נפתח בתוך העמוד במקום prompt() של המערכת */
+.iv-swap-panel { grid-column: 1 / -1; margin-top: 8px; padding: 12px 14px;
+  background: rgba(8,14,36,0.45); border: 1px solid var(--border-strong); border-radius: 12px; }
+.iv-swap-panel .field { margin-bottom: 8px; }
+.iv-swap-panel textarea { width: 100%; resize: vertical; }
+
+/* ------- מסך המראיין בטלפון -------
+   נקודת השבירה של הפרויקט (620px). התקלה המרכזית: .iv-person-row הוא גריד
+   של 3 עמודות שדורש ~259px מינימום מול ~251px פנויים ב-iPhone. */
+@media (max-width: 620px) {
+  .wrap { padding: 16px 12px; }
+  .card { padding: 18px 14px; }
+  .iv-person-row { grid-template-columns: 1fr; gap: 6px; padding: 12px 0; }
+  .iv-person-row .btn.small { width: 100%; margin-top: 4px; }
+  .iv-slot { padding: 10px 11px; }
+  .iv-times { gap: 8px; }
+  .iv-times > span { flex: 1; min-width: 96px; padding: 8px 10px; }
+  .iv-times b { font-size: 19px; }
+  .iv-round-box .big { font-size: 18px; }
+  .iv-myroom b { font-size: 26px; }
+  /* ה-spacer דוחף את השם והיציאה לשורה נפרדת ומייצר כותרת בת 4 שורות */
+  .exm-header .spacer { display: none; }
+  .exm-header { gap: 10px; }
+  /* יעדי מגע תקניים */
+  .btn.small { min-height: 42px; }
+  /* ⚠ פחות מ-16px גורם ל-iOS לזום-אין על השדה ולהישאר מזוים */
+  input, select, textarea { font-size: 16px; }
+  .round-wait { padding: 12px 22px; }
+  .round-wait b { font-size: 34px; }
+}
 
 /* ------- הקמת יום הערכה (מסך מנהל) ------- */
 .day-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 10px 0 4px; }
@@ -630,3 +675,7 @@ tr.gr-locked td { background: rgba(69,184,78,0.05); }
   border: 1px solid rgba(69,184,78,0.4); border-radius: 999px; padding: 2px 9px; }
 .qcard.gr-approved { position: relative; }
 .pip.pip-locked { opacity: 0.5; cursor: default; }
+
+/* ייצוא למאנדיי — בחירת מחזורים לחיפוש */
+.mnd-cohorts { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 4px 0 12px;
+  padding: 10px 12px; background: rgba(8,14,36,0.35); border: 1px solid var(--border); border-radius: 12px; }

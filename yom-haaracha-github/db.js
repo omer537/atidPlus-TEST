@@ -286,6 +286,16 @@ for (const alter of [
   'ALTER TABLE grading_rollups ADD COLUMN bonus_from TEXT',
   'ALTER TABLE grading_rollups ADD COLUMN criteria_json TEXT',
   'ALTER TABLE grading_rollups ADD COLUMN subjects_json TEXT',
+  // שעון הסבב — מקור אמת אחד לשלושת המסכים (מנהל · מראיין · נבחן שהגיש).
+  // `started_at` כבר קיים בטבלה; חסרו המשך וההשהיה, במקביל למה שיש ב-slots.
+  'ALTER TABLE day_rounds ADD COLUMN duration_sec INTEGER',
+  'ALTER TABLE day_rounds ADD COLUMN paused INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE day_rounds ADD COLUMN paused_at INTEGER',
+  'ALTER TABLE day_rounds ADD COLUMN paused_accum_sec INTEGER NOT NULL DEFAULT 0',
+  // ⚠ סימון «הציון הזה הוא הדגמה» — נכתב כשרצה בדיקה בלי ANTHROPIC_API_KEY.
+  // בלעדיו ציוני הדגמה (לפי אורך התשובה בלבד) נראים במסד זהים לציונים אמיתיים,
+  // ואי אפשר לבדוק אותם מחדש אחרי שמוסיפים מפתח.
+  'ALTER TABLE grading_items ADD COLUMN ai_demo INTEGER NOT NULL DEFAULT 0',
 ]) {
   try { db.exec(alter); } catch (e) { /* העמודה כבר קיימת */ }
 }

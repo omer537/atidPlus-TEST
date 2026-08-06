@@ -7,6 +7,9 @@ window.AdminApp = (function () {
 
   var token = localStorage.getItem('yh_examiner_token') || null;
   var pollHandle = null;
+  // ⚠ מזהה נפרד לשעון-השנייה. בלי לשמור ולנקות אותו, כל כניסה חוזרת מוסיפה
+  // interval נוסף והספירה יורדת כמה שניות בשנייה (הבאג שהיה במסך המראיין).
+  var tickHandle = null;
   var root = document.getElementById('root');
   var availableSubjects = [];
   var addSubjects = [];
@@ -144,7 +147,7 @@ window.AdminApp = (function () {
       '<div id="health"></div></div></div>' +
       '</div>'
     ));
-    document.getElementById('btn-logout').onclick = function () { localStorage.removeItem('yh_examiner_token'); token = null; if (pollHandle) clearInterval(pollHandle); leave(); };
+    document.getElementById('btn-logout').onclick = function () { localStorage.removeItem('yh_examiner_token'); token = null; if (pollHandle) clearInterval(pollHandle); if (tickHandle) clearInterval(tickHandle); leave(); };
     document.getElementById('btn-roster').onclick = downloadRoster;
     document.getElementById('btn-excel').onclick = downloadExcel;
     document.getElementById('btn-export').onclick = downloadExport;
@@ -977,6 +980,52 @@ window.AdminApp = (function () {
   }
 
   // ------------------------------------------------- קונסולת הסבב
+  // ------------------------------------------------- שעון הסבב
+  // מקור הנתונים: `S.round_timer` מהשרת (אותו חישוב בדיוק שמגיע למסך המראיין
+  // ולמסך הנבחן שהגיש). כאן רק מציגים ומחליקים בין רענון לרענון.
+  var RT = null; // { timer, syncAt }
+
+  function clockHM(ms) {
+    if (!ms) return '--:--';
+    var d = new Date(ms);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  }
+  // כמה שניות נותרו *עכשיו*, בהחלקה מקומית מאז הסנכרון האחרון עם השרת.
+  function rtNow() {
+    if (!RT || !RT.timer || RT.timer.state === 'none') return null;
+    var since = Math.floor((Date.now() - RT.syncAt) / 1000);
+    if (RT.timer.state === 'paused') return { state: 'paused', remaining: RT.timer.remaining_sec, overtime: RT.timer.overtime_sec };
+    var rem = RT.timer.remaining_sec - since;
+    if (rem > 0) return { state: 'running', remaining: rem, overtime: 0 };
+    return { state: 'expired', remaining: 0, overtime: RT.timer.overtime_sec + since };
+  }
+
+  function roundClockHtml(S, solvers) {
+    if (!S.running || !S.round_timer || S.round_timer.state === 'none') return '';
+    var t = S.round_timer;
+    var done = solvers.filter(function (e) { return e.current && e.current.status === 'done'; }).length;
+    var leftHtml = t.state === 'expired'
+      ? '<b id="rt-left" class="over">+' + fmtTime(t.overtime_sec) + '</b>'
+      : '<b id="rt-left">' + fmtTime(t.remaining_sec) + '</b>';
+    return '<div class="round-clock' + (t.state === 'paused' ? ' paused' : '') + '">' +
+      '<div class="iv-times">' +
+      '<span><small>התחיל</small><b>' + clockHM(t.started_at) + '</b></span>' +
+      '<span><small>אמור להסתיים</small><b>' + clockHM(t.ends_at) + '</b></span>' +
+      '<span><small>' + (t.state === 'expired' ? 'חריגה' : 'נותר לסבב') + '</small>' + leftHtml + '</span>' +
+      '<span><small>הגישו</small><b id="rt-done">' + done + ' / ' + solvers.length + '</b></span>' +
+      '</div>' +
+      (t.state === 'paused' ? '<p class="hint-text" style="text-align:center;margin:8px 0 0">⏸ הכול מושהה — השעון עצר.</p>' : '') +
+      '</div>';
+  }
+
+  // רץ כל שנייה. ⚠ תמיד null-guard: הקופסה לא קיימת כשאין סבב פעיל.
+  function roundTick() {
+    var elm = document.getElementById('rt-left'); if (!elm) return;
+    var v = rtNow(); if (!v) return;
+    if (v.state === 'expired') { elm.textContent = '+' + fmtTime(v.overtime); elm.classList.add('over'); }
+    else { elm.textContent = fmtTime(v.remaining); elm.classList.toggle('over', false); }
+  }
+
   function renderConsole(S) {
     var box = document.getElementById('console'); if (!box) return;
     var states = {}; S.rounds.forEach(function (r) { states[r.round] = r.state; });
@@ -1006,9 +1055,15 @@ window.AdminApp = (function () {
     function nameChips(arr, withNow) {
       if (!arr.length) return '<span style="color:var(--faint)">— אין —</span>';
       return arr.map(function (e) {
-        var extra = '';
-        if (withNow && e.current && e.current.kind === 'chapter') extra = ' · ' + esc(e.current.subject || '') + (e.timer && e.timer.state === 'running' ? ' (' + fmtTime(e.timer.remaining_sec) + ')' : '');
-        return '<span class="chip-name">' + esc(e.name) + extra + '</span>';
+        var extra = '', cls = '';
+        if (withNow && e.current && e.current.kind === 'chapter') {
+          extra = ' · ' + esc(e.current.subject || '');
+          // ⚠ מי שהגיש — הטיימר שלו עדיין "רץ" בחישוב, אבל להציג לו ספירה זה
+          // מטעה (במיוחד ליד המונה «הגישו N/M»). מסמנים ✓ במקום.
+          if (e.current.status === 'done') { extra += ' ✓ הגיש'; cls = ' done'; }
+          else if (e.timer && e.timer.state === 'running') extra += ' (' + fmtTime(e.timer.remaining_sec) + ')';
+        }
+        return '<span class="chip-name' + cls + '">' + esc(e.name) + extra + '</span>';
       }).join('');
     }
 
@@ -1034,6 +1089,7 @@ window.AdminApp = (function () {
     box.innerHTML =
       '<h2 class="section-title">ניהול הסבב</h2>' +
       '<div class="round-strip">' + strip + '</div>' +
+      roundClockHtml(S, solvers) +
       '<p style="font-weight:700;margin:14px 0 4px">' + esc(title) + '</p>' +
       '<div class="btn-row" id="console-controls">' + controls + '</div>' +
       '<div class="two-lists">' +
@@ -1298,8 +1354,31 @@ window.AdminApp = (function () {
     } catch (e) { alert(e.message); }
   }
   async function endRound() {
-    if (!confirm('לסיים את הסבב הנוכחי? כל הפרקים ייסגרו והנבחנים יעברו להמתנה לסבב הבא.')) return;
-    try { await call('/examiner/end-round', 'POST', {}); refresh(); } catch (e) { alert(e.message); }
+    // ⚠ המנוע תמיד הרשה לסיים סבב באמצע — אבל בשקט. כאן מראים למנהל את מי
+    // בדיוק הוא חותך, כדי שההחלטה (לחכות עוד דקה / לסיים) תהיה מדעת.
+    var late = (STATE && STATE.examinees || []).filter(function (e) {
+      return e.current && e.current.kind === 'chapter' && e.current.status !== 'done';
+    });
+    var msg;
+    if (late.length) {
+      var names = late.slice(0, 6).map(function (e) {
+        return '• ' + e.name + ' (' + (e.current.subject || 'פרק') + ', ' + (e.answered || 0) + ' תשובות)';
+      }).join('\n');
+      if (late.length > 6) names += '\n• ועוד ' + (late.length - 6) + '…';
+      msg = '⚠ ' + (late.length === 1 ? 'נבחן אחד עדיין לא הגיש' : late.length + ' נבחנים עדיין לא הגישו') + ':\n\n' + names +
+        '\n\nלסיים את הסבב בכל זאת? הפרק שלהם ייסגר עם מה שכתבו עד עכשיו (התשובות נשמרות ונכנסות לבדיקה), והם יעברו להמתנה לסבב הבא.';
+    } else {
+      msg = 'כולם הגישו ✓  לסיים את הסבב הנוכחי? הנבחנים יעברו להמתנה לסבב הבא.';
+    }
+    if (!confirm(msg)) return;
+    try {
+      var res = await call('/examiner/end-round', 'POST', {});
+      toast(res.unsubmitted_count
+        ? 'סבב ' + res.round + ' הסתיים · ' + (res.unsubmitted_count === 1 ? 'אחד נסגר' : res.unsubmitted_count + ' נסגרו') +
+          ' באמצע: ' + res.unsubmitted.map(function (u) { return u.name; }).join(', ')
+        : 'סבב ' + res.round + ' הסתיים · כולם הגישו ✓');
+      refresh();
+    } catch (e) { alert(e.message); }
   }
   async function resetRound(r) {
     if (!confirm('לבטל/לאפס את סבב ' + r + '? המשבצות של הסבב יימחקו והוא יחזור למצב "מוכן". התשובות נשמרות. (נוצר גיבוי לפני.)')) return;
@@ -1431,6 +1510,8 @@ window.AdminApp = (function () {
   // ------------------------------------------------- לולאה
   async function refresh() {
     try { STATE = await call('/examiner/status'); } catch (e) { if (e.status === 401) return renderLogin('פג תוקף. התחבר/י מחדש.'); return; }
+    // סנכרון שעון הסבב — הרענון כל 3 שניות; ה-tick מחליק בין לבין.
+    RT = { timer: STATE.round_timer || null, syncAt: Date.now() };
     var M = null;
     if (!matrixHidden) { try { M = await call('/examiner/matrix'); } catch (e) { /* אל תשבור את הרענון */ } }
     // ⚠ כל חלק מצטייר בנפרד: כשל באחד לא מפיל את השאר (זה מה שהסתיר באג
@@ -1466,6 +1547,8 @@ window.AdminApp = (function () {
     refresh(); loadBackups();
     if (pollHandle) clearInterval(pollHandle);
     pollHandle = setInterval(refresh, 3000);
+    if (tickHandle) clearInterval(tickHandle);
+    tickHandle = setInterval(roundTick, 1000);
   }
 
   async function enter() {
@@ -1474,6 +1557,7 @@ window.AdminApp = (function () {
   }
   function leave() {
     if (pollHandle) clearInterval(pollHandle);
+    if (tickHandle) clearInterval(tickHandle);
     if (typeof window.__showExamineeLogin === 'function') window.__showExamineeLogin();
     else location.href = '/';
   }

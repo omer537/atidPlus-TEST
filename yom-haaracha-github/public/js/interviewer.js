@@ -10,6 +10,21 @@ window.InterviewerApp = (function () {
   var pollHandle = null;
   var tickHandle = null;   // ⚠ היה setInterval בלי מזהה — דלף בכל כניסה מחדש
   var DATA = null;
+  // ⚠ המסך נבנה מחדש כל 5 שניות — בטלפון זה מקפיץ את הגלילה ומוחק פאנל פתוח.
+  // מפתח רינדור, בדיוק כמו App.renderedKey במסך הנבחן: בונים רק כשמשהו השתנה.
+  var renderedKey = null;
+  var openSwap = null;     // code של השורה שהפאנל פתוח בה
+  var swapText = '';       // נשמר כדי שרינדור מחדש לא ימחק מה שכבר הוקלד
+  // ⚠ מלכודת מתועדת: הודעה שנכתבת ישירות ל-#iv-msg נמחקת ברינדור הבא.
+  // לכן היא נשמרת כאן ומצוירת מחדש בכל render, עד שפג תוקפה.
+  var notice = null;       // { text, kind, until }
+  function say(text, kind) { notice = { text: text, kind: kind || 'info', until: Date.now() + 6000 }; paintNotice(); }
+  function noticeHtml() {
+    if (!notice || Date.now() > notice.until) { notice = null; return ''; }
+    return '<div class="msg ' + notice.kind + '">' + esc(notice.text) + '</div>';
+  }
+  function paintNotice() { var b = document.getElementById('iv-msg'); if (b) b.innerHTML = noticeHtml(); }
+  var SYNC = null;         // { remaining, state, at } — החלקת השעון בין רענונים
 
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -34,6 +49,7 @@ window.InterviewerApp = (function () {
   // ------------------------------------------------- כניסה
   async function renderLogin(errMsg) {
     if (pollHandle) clearInterval(pollHandle);
+    renderedKey = null; openSwap = null; swapText = '';
     root.className = 'center-screen';
     var list = [];
     try { list = (await call('/interviewers-public')).interviewers || []; } catch (e) { list = []; }
@@ -88,13 +104,17 @@ window.InterviewerApp = (function () {
     if (!D.running) {
       curHtml = roomBig + '<div class="iv-round-box"><div class="big">אין סבב פעיל</div><div class="sub">ממתינים שהמנהל יתחיל את הסבב הבא.</div></div>';
     } else {
-      var leftSec = cur && cur.ends_at ? Math.max(0, Math.floor((cur.ends_at - D.server_now) / 1000)) : null;
+      // אותו מספר בדיוק שהמנהל והנבחנים רואים — מגיע מוכן מהשרת (computeRoundTimer).
+      var v = leftNow();
       curHtml = roomBig + '<div class="iv-round-box"><div class="big">סבב ' + D.running + ' — פועל</div>' +
         '<div class="iv-times">' +
         '<span><small>התחיל</small><b>' + clock(cur && cur.started_at) + '</b></span>' +
         '<span><small>מסתיים</small><b>' + clock(cur && cur.ends_at) + '</b></span>' +
-        '<span><small>נותר</small><b id="iv-left">' + fmtLeft(leftSec) + '</b></span>' +
-        '</div></div>';
+        '<span><small>' + (v && v.state === 'expired' ? 'חריגה' : 'נותר') + '</small>' +
+        '<b id="iv-left">' + leftText(v) + '</b></span>' +
+        '</div>' +
+        (v && v.state === 'paused' ? '<div class="sub">⏸ הסבב מושהה — השעון עצר.</div>' : '') +
+        '</div>';
     }
 
     // הלו"ז שלי
@@ -111,12 +131,21 @@ window.InterviewerApp = (function () {
           var badge = s.in_interview ? '<span class="pill interview">אצלי כרגע</span>'
             : (s.interviewed ? '<span class="pill done">הסתיים</span>'
               : (r.state === 'running' ? '<span class="pill chapter">עכשיו</span>' : '<span class="pill">ממתין</span>'));
+          // פאנל ההחלפה נפתח בתוך העמוד ולא כ-prompt() של המערכת — בטלפון
+          // דיאלוג מערכת עם שורה אחת הוא משטח הקלט הגרוע ביותר.
+          var panel = openSwap === s.code
+            ? '<div class="iv-swap-panel">' +
+              '<label class="field"><span>מה תרצה/י לשנות בלו״ז? (' + esc(s.name) + ' · סבב ' + r.round + ')</span>' +
+              '<textarea id="iv-swap-txt" rows="3" placeholder="לדוגמה: אני מכיר/ה אותה מחוץ למסגרת — עדיף להעביר למראיין אחר">' + esc(swapText) + '</textarea></label>' +
+              '<div class="btn-row"><button class="btn small iv-swap-send" data-r="' + r.round + '" data-c="' + esc(s.code) + '" data-n="' + esc(s.name) + '">שלח למנהל</button>' +
+              '<button class="btn ghost small iv-swap-cancel">ביטול</button></div></div>'
+            : '';
           return '<div class="iv-person-row">' +
             '<div class="iv-nm"><b>' + esc(s.name) + '</b>' + (s.left ? ' <small style="color:var(--danger)">(עזב)</small>' : '') + ' ' + badge +
             (iv.room ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">אצלך · ' + esc(iv.room) + '</div>' : '') + '</div>' +
             (s.brief ? '<div class="iv-brief">' + esc(s.brief) + '</div>' : '<div class="iv-brief empty">— אין בריף —</div>') +
-            '<button class="btn ghost small iv-swap" data-r="' + r.round + '" data-c="' + esc(s.code) + '" data-n="' + esc(s.name) + '">בקש החלפה</button>' +
-            '</div>';
+            '<button class="btn ghost small iv-swap" data-c="' + esc(s.code) + '">' + (openSwap === s.code ? 'סגור' : 'בקש החלפה') + '</button>' +
+            panel + '</div>';
         }).join('') + '</div>';
     }).join('') || '<p class="hint-text">עדיין לא שובצו לך ריאיונות. המנהל משבץ — המסך יתעדכן לבד.</p>';
 
@@ -142,7 +171,7 @@ window.InterviewerApp = (function () {
       '<div class="card"><h2 class="section-title">הלו״ז שלי</h2>' +
       '<p class="hint-text">מי מרואיין אצלך בכל סבב, עם בריף קצר. המסך מתעדכן לבד. שינוי בלו״ז נעשה דרך המנהל — לחצו «בקש החלפה».</p>' +
       roundsHtml + '</div>' +
-      '<div id="iv-msg"></div>' +
+      '<div id="iv-msg">' + noticeHtml() + '</div>' +
       '</div>'
     ));
     document.getElementById('iv-out').onclick = function () {
@@ -152,33 +181,91 @@ window.InterviewerApp = (function () {
       renderLogin();
     };
     root.querySelectorAll('.iv-swap').forEach(function (b) {
-      b.onclick = function () { askSwap(Number(b.getAttribute('data-r')), b.getAttribute('data-n'), b.getAttribute('data-c')); };
+      b.onclick = function () {
+        var c = b.getAttribute('data-c');
+        if (openSwap !== c) swapText = '';
+        openSwap = (openSwap === c) ? null : c;
+        rerender();
+        var ta = document.getElementById('iv-swap-txt'); if (ta) ta.focus();
+      };
     });
+    root.querySelectorAll('.iv-swap-cancel').forEach(function (b) {
+      b.onclick = function () { openSwap = null; swapText = ''; rerender(); };
+    });
+    root.querySelectorAll('.iv-swap-send').forEach(function (b) {
+      b.onclick = function () { sendSwap(Number(b.getAttribute('data-r')), b.getAttribute('data-n'), b.getAttribute('data-c')); };
+    });
+    var ta = document.getElementById('iv-swap-txt');
+    if (ta) ta.oninput = function () { swapText = ta.value; };
   }
 
-  async function askSwap(round, name, code) {
-    var txt = prompt('מה תרצה/י לשנות בלו״ז?\n(' + name + ' · סבב ' + round + ')\n\nהבקשה תישלח למנהל לאישור.', '');
-    if (txt === null || !txt.trim()) return;
+  // בנייה מחדש *יזומה* — מעדכנת גם את מפתח הרינדור, אחרת הרענון הבא (5 שניות)
+  // היה בונה שוב ומוחק את הפאנל שנפתח.
+  function rerender() {
+    render();
+    if (DATA) renderedKey = dataKey(DATA);
+  }
+
+  async function sendSwap(round, name, code) {
+    var ta = document.getElementById('iv-swap-txt');
+    var txt = ta ? ta.value.trim() : '';
+    if (!txt) { if (ta) ta.focus(); say('כתבו מה תרצו לשנות.', 'warn'); return; }
     try {
-      await call('/interviewer/swap-request', 'POST', { round: round, code: code, requested_change: name + ': ' + txt.trim() });
-      var box = document.getElementById('iv-msg');
-      if (box) box.innerHTML = '<div class="msg info">הבקשה נשלחה למנהל.</div>';
+      await call('/interviewer/swap-request', 'POST', { round: round, code: code, requested_change: name + ': ' + txt });
+      openSwap = null; swapText = ''; renderedKey = null;
+      say('הבקשה נשלחה למנהל.', 'info');
       refresh();
-    } catch (e) { alert(e.message); }
+    } catch (e) { say(e.message, 'error'); }
   }
 
+  // כמה נותר *עכשיו*: השרת נותן remaining_sec, וכאן מחליקים מקומית בין הרענונים.
+  function leftNow() {
+    if (!SYNC || SYNC.state === 'none') return null;
+    var since = Math.floor((Date.now() - SYNC.at) / 1000);
+    if (SYNC.state === 'paused') return { state: 'paused', remaining: SYNC.remaining, overtime: SYNC.overtime };
+    var rem = SYNC.remaining - since;
+    if (rem > 0) return { state: 'running', remaining: rem, overtime: 0 };
+    return { state: 'expired', remaining: 0, overtime: SYNC.overtime + since };
+  }
+  function leftText(v) {
+    if (!v) return '--:--';
+    return v.state === 'expired' ? '+' + fmtLeft(v.overtime) : fmtLeft(v.remaining);
+  }
   // שעון מקומי בין הרענונים (כדי שהזמן ירוץ חלק)
   function tick() {
-    if (!DATA || !DATA.current || !DATA.current.ends_at) return;
+    // ההודעה פגה מעצמה גם כשאין רינדור מחדש (המסך יציב = אין render)
+    if (notice && Date.now() > notice.until) paintNotice();
     var box = document.getElementById('iv-left'); if (!box) return;
-    DATA.server_now += 1000;
-    box.textContent = fmtLeft(Math.max(0, Math.floor((DATA.current.ends_at - DATA.server_now) / 1000)));
+    var v = leftNow(); if (!v) return;
+    box.textContent = leftText(v);
+    box.classList.toggle('over', v.state === 'expired');
+  }
+
+  // חתימת הנתונים — כל מה שמשנה את *מבנה* המסך. הזמן לא נכלל: אותו מטפל ה-tick.
+  function dataKey(D) {
+    return [
+      D.running,
+      (D.rounds || []).map(function (r) { return r.round + r.state; }).join(','),
+      (D.schedule || []).map(function (s) { return s.round + '|' + s.code + '|' + s.status + '|' + (s.brief || '').length + '|' + (s.left ? 1 : 0); }).join(';'),
+      (D.my_swaps || []).filter(function (s) { return s.status === 'pending'; }).length,
+      D.interviewer.room, D.interviewer.brief, D.day ? D.day.name : '',
+      openSwap || '',
+      SYNC ? SYNC.state : '',
+    ].join('#');
   }
 
   async function refresh() {
     try { DATA = await call('/interviewer/schedule'); }
     catch (e) { if (e.status === 401) { token = null; localStorage.removeItem('yh_interviewer_token'); return renderLogin('פג תוקף. התחבר/י מחדש.'); } return; }
-    try { render(); } catch (e) { /* לא לשבור את הלולאה */ }
+    var c = DATA.current;
+    SYNC = c ? { state: c.state, remaining: c.remaining_sec, overtime: c.overtime_sec || 0, at: Date.now() }
+      : { state: 'none', remaining: 0, overtime: 0, at: Date.now() };
+    try {
+      var k = dataKey(DATA);
+      if (k === renderedKey) { tick(); return; } // ⚠ בלי בנייה מחדש: לא לקפוץ בגלילה
+      renderedKey = k;
+      render();
+    } catch (e) { /* לא לשבור את הלולאה */ }
   }
 
   function start() {

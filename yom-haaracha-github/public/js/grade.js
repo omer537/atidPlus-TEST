@@ -27,7 +27,9 @@ window.GradeApp = (function () {
     var res = await fetch('/api' + path, { method: method || 'GET', headers: headers, body: body ? JSON.stringify(body) : undefined });
     if (raw) return res;
     var data = null; try { data = await res.json(); } catch (e) {}
-    if (!res.ok) throw Object.assign(new Error((data && data.error) || 'שגיאה'), { status: res.status });
+    // ⚠ גוף השגיאה נשמר על האובייקט (`body`) ולא נזרק — יש endpoints שמחזירים
+    // דגלים משמעותיים עם השגיאה (למשל `demo_block` מ-run-ai).
+    if (!res.ok) throw Object.assign(new Error((data && data.error) || 'שגיאה'), { status: res.status, body: data || {} }, data || {});
     return data;
   }
   async function downloadBlob(path, filename) {
@@ -136,9 +138,12 @@ window.GradeApp = (function () {
         '<button class="btn ghost small" id="btn-merged">ייצא את כל הימים לקובץ אחד</button>' +
         '<span class="hint-text" style="margin:0;align-self:center">גיליון לכל יום + גיליון «הכול». הדירוג נשאר בתוך כל יום — המבחנים לא זהים בין הימים.</span>' +
         '</div>' : '') +
-      '</div>';
+      '</div>' +
+
+      (cohorts.length ? mondayCardHtml(cohorts) : '');
 
     wireTopbar();
+    wireMonday();
     // ⚠ תמיד עם הגנת null — אלמנט חסר שובר את כל הרינדור (ראו CLAUDE.md)
     var bs = document.getElementById('btn-snap'); if (bs) bs.onclick = doSnapshot;
     var bi = document.getElementById('btn-import'); if (bi) bi.onclick = doImport;
@@ -151,6 +156,182 @@ window.GradeApp = (function () {
     root.querySelectorAll('.open-cohort').forEach(function (b) { b.onclick = function () { openCohort(Number(b.getAttribute('data-id'))); }; });
     root.querySelectorAll('.del-cohort').forEach(function (b) { b.onclick = function () { deleteCohort(Number(b.getAttribute('data-id'))); }; });
   }
+  // ================================================= ייצוא למאנדיי
+  // הקושי בהדבקה לבורד קיים הוא יישור שורות. הפתרון: הבורד קובע את הסדר —
+  // המשתמש מדביק את עמודת השם משם, ואנחנו מחזירים בדיוק אותן שורות באותו סדר.
+  var MND = null;      // תוצאת ההתאמה האחרונה
+  var mndText = '';    // מה שהודבק — נשמר כדי שרינדור לא ימחק אותו
+
+  function mondayCardHtml(cohorts) {
+    // ⚠ אותו שם בשני מחזורים (צילום כפול / מועמדת שהגיעה לשני ימים) לא משויך
+    // אוטומטית — בצדק. הסינון כאן הוא הדרך לפתור את זה מראש.
+    var picker = cohorts.length > 1
+      ? '<div class="mnd-cohorts">' + cohorts.map(function (c) {
+        return '<label class="mark-toggle"><input type="checkbox" class="mnd-coh" value="' + c.id + '" checked> ' + esc(c.name) + '</label>';
+      }).join('') + '</div>'
+      : '';
+    return '<div class="card" id="monday-card">' +
+      '<h2 class="section-title">ייצוא למאנדיי</h2>' +
+      '<p class="hint-text">במאנדיי: סמנו את <b>עמודת השם</b> של כל השורות ← Copy. הדביקו כאן ולחצו «התאם». ' +
+      'תקבלו את אותן שורות <b>בדיוק באותו סדר</b> עם ארבע עמודות הציון — לחצו «העתק» ובמאנדיי עמדו על התא הראשון ' +
+      'של עמודת «ציון» ועשו Paste. שורה שלא הותאמה יוצאת ריקה, כדי שהיישור יישמר.</p>' +
+      (picker ? '<p class="hint-text" style="margin-bottom:4px">באילו מחזורים לחפש:</p>' + picker : '') +
+      '<textarea id="mnd-in" rows="5" placeholder="שם אחד בכל שורה — בדיוק כפי שהועתק מהבורד" ' +
+      'style="width:100%;font-family:var(--mono);font-size:13px">' + esc(mndText) + '</textarea>' +
+      '<div class="btn-row" style="margin-top:10px"><button class="btn" id="mnd-go">התאם</button>' +
+      '<label class="mark-toggle"><input type="checkbox" id="mnd-head"> כלול שורת כותרת</label></div>' +
+      '<div id="mnd-out"></div></div>';
+  }
+
+  function mndCohorts() {
+    var boxes = document.querySelectorAll('.mnd-coh');
+    if (!boxes.length) return null;   // מחזור יחיד — השרת ייקח את הכול
+    var ids = [];
+    boxes.forEach(function (b) { if (b.checked) ids.push(Number(b.value)); });
+    return ids;
+  }
+
+  function wireMonday() {
+    var ta = document.getElementById('mnd-in');
+    if (ta) ta.oninput = function () { mndText = ta.value; };
+    var go = document.getElementById('mnd-go'); if (go) go.onclick = doMondayMatch;
+    var hd = document.getElementById('mnd-head'); if (hd) hd.onchange = renderMonday;
+    if (MND) renderMonday();
+  }
+
+  async function doMondayMatch() {
+    var ta = document.getElementById('mnd-in');
+    var out = document.getElementById('mnd-out');
+    if (!ta || !out) return;
+    mndText = ta.value;
+    var lines = mndText.split('\n');
+    // גוזמים שורות ריקות *בסוף* בלבד — ריקה באמצע היא שורה אמיתית בבורד.
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    if (!lines.length) { out.innerHTML = '<div class="msg warn">הדביקו קודם את עמודת השם מהבורד.</div>'; return; }
+    var ids = mndCohorts();
+    if (ids && !ids.length) { out.innerHTML = '<div class="msg warn">בחרו לפחות מחזור אחד לחיפוש.</div>'; return; }
+    out.innerHTML = '<div class="msg info">מתאים…</div>';
+    try {
+      var body = { names: lines };
+      if (ids) body.cohorts = ids;
+      MND = await call('/examiner/grading/monday-match', 'POST', body);
+      MND.cohorts = ids;   // נשמר לשליפה לפי מפתח בבחירה ידנית
+      renderMonday();
+    } catch (e) { out.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+  }
+
+  // ערך לתא: מספר או מחרוזת ריקה. אף פעם לא «טרם נבדק» — עמודת Number תדחה.
+  function mndCell(v) { return v == null ? '' : String(v); }
+  function mndTsv() {
+    if (!MND) return '';
+    var head = document.getElementById('mnd-head');
+    var lines = (head && head.checked) ? [MND.columns.join('\t')] : [];
+    MND.rows.forEach(function (r) {
+      var v = r.values || {};
+      lines.push([mndCell(v.final), mndCell(v.ravMelel), mndCell(v.quant), mndCell(v.english)].join('\t'));
+    });
+    return lines.join('\n');
+  }
+
+  function renderMonday() {
+    var out = document.getElementById('mnd-out'); if (!out || !MND) return;
+    var rows = MND.rows.map(function (r) {
+      var v = r.values || {};
+      var right;
+      if (r.blank) right = '<span style="color:var(--faint)">— שורה ריקה —</span>';
+      else if (r.matched) {
+        right = '<b style="color:var(--ok)">' + esc(r.matched.name) + '</b>' +
+          (r.matched.day ? ' <span style="font-size:11px;color:var(--muted)">· ' + esc(r.matched.day) + '</span>' : '') +
+          (r.pending ? ' <span class="pill" style="color:var(--warn)">עדיין בלי ציון</span>' : '');
+      } else if (r.suggestions.length) {
+        right = '<select class="mnd-pick" data-i="' + r.line + '"><option value="">— לא נמצא —</option>' +
+          r.suggestions.map(function (s) {
+            return '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.day ? ' · ' + esc(s.day) : '') + ' — ' + esc(s.reason) + '</option>';
+          }).join('') + '</select>';
+      } else right = '<span style="color:var(--danger)">לא נמצא</span>';
+
+      var cls = r.blank ? '' : (r.matched ? '' : ' style="background:rgba(251,92,107,0.07)"');
+      return '<tr' + cls + '><td style="color:var(--faint);font-size:11px">' + r.line + '</td>' +
+        '<td>' + esc(r.raw || '') + '</td><td>' + right + '</td>' +
+        '<td class="gr-final">' + (v.final == null ? '—' : v.final) + '</td>' +
+        '<td>' + (v.ravMelel == null ? '—' : v.ravMelel) + '</td>' +
+        '<td>' + (v.quant == null ? '—' : v.quant) + '</td>' +
+        '<td>' + (v.english == null ? '—' : v.english) + '</td></tr>';
+    }).join('');
+
+    var problems = MND.unmatched + MND.pending;
+    out.innerHTML =
+      '<div class="msg ' + (problems ? 'warn' : 'ok') + '" style="margin-top:12px">' +
+      '<b>' + MND.matched + ' מתוך ' + (MND.total - MND.blank) + ' הותאמו</b>' +
+      (MND.unmatched ? ' · ' + MND.unmatched + ' לא נמצאו' : '') +
+      (MND.pending ? ' · ' + MND.pending + ' עדיין בלי ציון (ייצאו ריקים)' : '') +
+      (MND.blank ? ' · ' + MND.blank + ' שורות ריקות' : '') + '</div>' +
+      '<div style="overflow-x:auto;max-height:44vh;margin-top:10px"><table class="grid"><thead><tr>' +
+      '<th>#</th><th>השם שהודבק</th><th>הותאם ל…</th><th>ציון</th><th>רב-מלל</th><th>כמותי</th><th>אנגלית</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="btn-row" style="margin-top:14px">' +
+      '<button class="btn" id="mnd-copy">העתק ' + MND.rows.length + ' שורות × 4 עמודות</button>' +
+      '<button class="btn ghost small" id="mnd-csv">הורד כ-CSV</button></div>' +
+      '<div id="mnd-fallback"></div>';
+
+    out.querySelectorAll('.mnd-pick').forEach(function (sel) {
+      sel.onchange = function () {
+        var row = MND.rows.find(function (r) { return r.line === Number(sel.getAttribute('data-i')); });
+        if (!row) return;
+        var pick = row.suggestions.find(function (s) { return s.key === sel.value; });
+        row.matched = pick || null;
+        // הערכים של ההצעה לא הגיעו מהשרת — מושכים אותם בהתאמה חוזרת לשם המדויק.
+        if (pick) applyPick(row, pick); else { row.values = { final: null, ravMelel: null, quant: null, english: null }; renderMonday(); }
+      };
+    });
+    var bc = document.getElementById('mnd-copy'); if (bc) bc.onclick = copyMonday;
+    var bv = document.getElementById('mnd-csv'); if (bv) bv.onclick = downloadMondayCsv;
+  }
+
+  // בחירה ידנית מההצעות — שולפים לפי *מפתח*, לא לפי שם. חיפוש חוזר לפי השם
+  // היה מחזיר שוב «מעורפל», כי זו בדיוק הסיבה שההצעה הופיעה מלכתחילה.
+  async function applyPick(row, pick) {
+    try {
+      var kb = { keys: [pick.key] };
+      if (MND.cohorts) kb.cohorts = MND.cohorts;
+      var r = await call('/examiner/grading/monday-match', 'POST', kb);
+      var got = r.values && r.values[pick.key];
+      row.values = got ? { final: got.final, ravMelel: got.ravMelel, quant: got.quant, english: got.english }
+        : { final: null, ravMelel: null, quant: null, english: null };
+      row.pending = !!(got && got.pending);
+    } catch (e) { row.values = { final: null, ravMelel: null, quant: null, english: null }; }
+    MND.matched = MND.rows.filter(function (x) { return x.matched; }).length;
+    MND.unmatched = MND.rows.filter(function (x) { return !x.blank && !x.matched; }).length;
+    renderMonday();
+  }
+
+  async function copyMonday() {
+    var txt = mndTsv();
+    try {
+      await navigator.clipboard.writeText(txt);
+      toast('הועתק ✓ במאנדיי: עמדו על התא הראשון של «ציון» ועשו Paste');
+    } catch (e) {
+      // ⚠ clipboard זמין רק ב-HTTPS/localhost. נפילה חזרה: תיבה לבחירה ידנית.
+      var fb = document.getElementById('mnd-fallback'); if (!fb) return;
+      fb.innerHTML = '<p class="hint-text" style="margin-top:10px">ההעתקה האוטומטית נחסמה בדפדפן. סמנו את התוכן והעתיקו ידנית (Cmd+C):</p>' +
+        '<textarea id="mnd-raw" rows="8" readonly style="width:100%;font-family:var(--mono);font-size:12px"></textarea>';
+      var raw = document.getElementById('mnd-raw');
+      raw.value = txt; raw.focus(); raw.select();
+    }
+  }
+
+  function downloadMondayCsv() {
+    // BOM כדי ש-Excel יזהה עברית ב-UTF-8.
+    var csv = '﻿' + MND.columns.join(',') + '\n' + MND.rows.map(function (r) {
+      var v = r.values || {};
+      return [mndCell(v.final), mndCell(v.ravMelel), mndCell(v.quant), mndCell(v.english)].join(',');
+    }).join('\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = 'monday-scores.csv'; document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function doSnapshot() {
     var box = document.getElementById('snap-msg');
     var name = document.getElementById('snap-name').value.trim();
@@ -233,13 +414,22 @@ window.GradeApp = (function () {
         '<td><button class="btn ghost small open-rev" data-c="' + esc(e.code) + '">פתח לבדיקה</button></td></tr>';
     }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--faint);padding:24px">אין נבחנים במחזור.</td></tr>';
 
+    // ⚠ ציוני הדגמה שכבר נכתבו למסד — הכי חשוב שהמשתמש יראה את זה, כי הם
+    // נראים בכל מסך כמו ציונים אמיתיים.
+    var demoN = COHORT.demoItems || 0;
+    var demoRow = demoN
+      ? '<div class="msg error"><b>⚠ ' + demoN + ' ציונים במחזור הזה הם ציוני הדגמה</b> — הם חושבו לפי אורך התשובה בלבד, ' +
+        'בלי מפתח API, ואינם משקפים את התוכן. הגדירו מפתח ולחצו «בדוק מחדש ציוני הדגמה».</div>'
+      : '';
+
     root.innerHTML = topbar(c.name) +
-      demoBanner(COHORT.demo) +
+      demoBanner(COHORT.demo) + demoRow +
       '<div class="card">' +
       '<div class="toolbar"><button class="btn ghost small" id="btn-back">◀ כל המחזורים</button>' +
       '<h2 class="section-title" style="margin:0">' + esc(c.name) + '</h2><span class="spacer"></span>' +
       '<button class="btn ghost small" id="btn-testkey">בדוק חיבור</button>' +
       '<button class="btn small" id="btn-runai">הרץ בדיקת AI</button>' +
+      (demoN ? '<button class="btn danger small" id="btn-redemo">בדוק מחדש ' + demoN + ' ציוני הדגמה</button>' : '') +
       (failedCount ? '<button class="btn ghost small" id="btn-retry">נסה שוב את מה שנכשל (' + failedCount + ')</button>' : '') +
       '<button class="btn small" id="btn-byq">בדיקה לפי שאלה ▸</button>' +
       '<button class="btn small" id="btn-sheet">בנה גיליון ציונים</button>' +
@@ -260,6 +450,11 @@ window.GradeApp = (function () {
     var ba = document.getElementById('btn-runai'); if (ba) ba.onclick = function () { runAi(false); };
     var bt = document.getElementById('btn-testkey'); if (bt) bt.onclick = testKey;
     var bry = document.getElementById('btn-retry'); if (bry) bry.onclick = function () { runAi(true); };
+    var brd = document.getElementById('btn-redemo');
+    if (brd) brd.onclick = function () {
+      if (!confirm('לבדוק מחדש ' + demoN + ' ציוני הדגמה מול המודל האמיתי? הציונים הקיימים יוחלפו.')) return;
+      runAi(false, { only_demo: true });
+    };
     var bsh = document.getElementById('btn-sheet'); if (bsh) bsh.onclick = function () { openSheet(c.id); };
     var bq = document.getElementById('btn-byq'); if (bq) bq.onclick = openQuestions;
     root.querySelectorAll('.open-rev').forEach(function (b) { b.onclick = function () { openReview(b.getAttribute('data-c')); }; });
@@ -276,12 +471,27 @@ window.GradeApp = (function () {
         (r.ok ? ' · עומק חשיבה: ' + esc(r.effort) : '') + '</div>';
     } catch (e) { box.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
   }
-  async function runAi(onlyFailed) {
+  async function runAi(onlyFailed, opts) {
+    var body = { cohort_id: COHORT.cohort.id, only_failed: !!onlyFailed };
+    if (opts && opts.only_demo) body.only_demo = true;
+    if (opts && opts.confirm_demo) body.confirm_demo = true;
     try {
-      var r = await call('/examiner/grading/run-ai', 'POST', { cohort_id: COHORT.cohort.id, only_failed: !!onlyFailed });
-      if (r.nothing) { alert(onlyFailed ? 'אין פריטים שנכשלו.' : 'הכול כבר נבדק.'); return; }
+      var r = await call('/examiner/grading/run-ai', 'POST', body);
+      if (r.nothing) {
+        alert(onlyFailed ? 'אין פריטים שנכשלו.' : (body.only_demo ? 'אין ציוני הדגמה לבדוק מחדש.' : 'הכול כבר נבדק.'));
+        return;
+      }
       startProgress(COHORT.cohort.id);
-    } catch (e) { alert(e.message); }
+    } catch (e) {
+      // ⚠ הרצה בלי מפתח נחסמת בשרת. רק אישור מפורש של המשתמש פותח אותה,
+      // כדי שאף אחד לא יגלה בדיעבד שהציונים היו לפי אורך התשובה.
+      if (e.demo_block) {
+        if (!confirm('אין מפתח API.\n\nהרצה עכשיו תיתן ציוני הדגמה לפי אורך התשובה בלבד — לא לפי התוכן.\n' +
+          'זה שימושי רק כדי להתנסות במסך. אפשר יהיה לבדוק מחדש אחרי שתגדירו מפתח.\n\nלהריץ בכל זאת?')) return;
+        return runAi(onlyFailed, Object.assign({}, opts, { confirm_demo: true }));
+      }
+      alert(e.message);
+    }
   }
   // ההתקדמות נמדדת בתשובות (מה שמעניין), ובסוגריים מספר הקריאות למודל.
   function renderProgress(p) {
@@ -717,7 +927,9 @@ window.GradeApp = (function () {
       return '<tr' + (r.include ? '' : ' style="opacity:.5"') + '>' +
         '<td><input type="checkbox" class="sh-inc" data-c="' + esc(r.code) + '"' + (r.include ? ' checked' : '') + '></td>' +
         '<td>' + (r.pending ? '·' : (r.rank || (i + 1))) + '</td>' +
-        '<td><b>' + esc(r.name) + '</b>' + (r.partial ? ' <span style="color:var(--warn);font-size:11px" title="מבחן חלקי">⚑</span>' : '') + '</td>' +
+        // שם ניתן לעריכה — נדרש למי שנרשם עם מספר טלפון במקום שם.
+        '<td><b class="sh-name" contenteditable="true" spellcheck="false" data-c="' + esc(r.code) + '" title="לחצו כדי לתקן שם">' + esc(r.name) + '</b>' +
+        (r.partial ? ' <span style="color:var(--warn);font-size:11px" title="מבחן חלקי">⚑</span>' : '') + '</td>' +
         '<td class="gr-final">' + g(r.final) + '</td>' +
         '<td>' + g(r.ravMelel) + '</td>' +
         '<td>' + (r.quant == null ? '—' : g(r.quant)) + '</td>' +
@@ -728,8 +940,15 @@ window.GradeApp = (function () {
     }).join('') || '<tr><td colspan="10" style="text-align:center;color:var(--faint);padding:20px">אין נתונים.</td></tr>';
     m.innerHTML = '<div class="modal-card" style="max-width:1040px">' +
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><h2 style="margin:0;font-size:20px">גיליון ציונים — ' + esc(data.cohort.name) + '</h2><span style="flex:1"></span><button class="btn ghost small" id="sh-close">סגור</button></div>' +
-      (pendingCount ? '<div class="msg warn">' + pendingCount + ' נבחנים עדיין בלי ציון — תשובות הרב-מלל שלהם טרם נבדקו. הריצו «בדיקת AI» ואשרו לפני שמפיקים את הגיליון.</div>' : '') +
-      '<p class="hint-text">הציון = רב-מלל + בונוס על המקצוע החזק. סמנו מי נכלל בגיליון. הייצוא ל-Excel מסודר לפי שם בעמודה הראשונה — מתאים להעלאה ל-monday.</p>' +
+      // ⚠ לפרט *למה* כל אחד תקוע — פריט שנכשל דורש ציון ידני, לא סבלנות.
+      (pendingCount
+        ? '<div class="msg warn"><b>' + pendingCount + ' נבחנים עדיין בלי ציון:</b><br>' +
+          data.rows.filter(function (r) { return r.pending; }).slice(0, 8).map(function (r) {
+            return '· ' + esc(r.name) + ' — ' + esc(r.pendingReason || 'תשובות הרב-מלל טרם נבדקו');
+          }).join('<br>') +
+          (pendingCount > 8 ? '<br>· ועוד ' + (pendingCount - 8) + '…' : '') + '</div>'
+        : '') +
+      '<p class="hint-text">הציון = רב-מלל + בונוס על המקצוע החזק. סמנו מי נכלל בגיליון. להכנסה למאנדיי — «ייצוא למאנדיי» במסך הראשי (מתאים את השורות לסדר של הבורד).</p>' +
       '<div style="overflow-x:auto;max-height:52vh;margin-top:10px"><table class="grid"><thead><tr>' +
       '<th>כלול</th><th>דרג</th><th>שם</th><th>ציון</th><th>רב-מלל</th><th>כמותי</th><th>אנגלית</th><th>בונוס</th><th>מקצועות</th><th>המלצה</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
@@ -738,6 +957,19 @@ window.GradeApp = (function () {
     document.getElementById('sh-close').onclick = function () { m.remove(); };
     document.getElementById('sh-export').onclick = function () { downloadBlob('/examiner/grading/export-sheet/' + data.cohort.id, 'grades-' + data.cohort.id + '.xlsx').catch(function (e) { alert(e.message); }); };
     document.getElementById('sh-export-all').onclick = function () { downloadBlob('/examiner/grading/export-sheet/' + data.cohort.id + '?all=1', 'grades-all-' + data.cohort.id + '.xlsx').catch(function (e) { alert(e.message); }); };
+    m.querySelectorAll('.sh-name').forEach(function (nb) {
+      var before = nb.textContent;
+      nb.onblur = function () {
+        var v = nb.textContent.trim();
+        if (!v) { nb.textContent = before; return; }
+        if (v === before) return;
+        call('/examiner/grading/examinee-flags', 'POST', { cohort_id: data.cohort.id, code: nb.getAttribute('data-c'), name: v })
+          .then(function () { before = v; toast('השם עודכן ✓'); })
+          .catch(function (e) { nb.textContent = before; alert(e.message); });
+      };
+      // Enter מסיים עריכה במקום להוסיף שורה
+      nb.onkeydown = function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); nb.blur(); } };
+    });
     m.querySelectorAll('.sh-inc').forEach(function (cb) {
       cb.onclick = function () { call('/examiner/grading/examinee-flags', 'POST', { cohort_id: data.cohort.id, code: cb.getAttribute('data-c'), include: cb.checked }).catch(function (e) { alert(e.message); }); cb.closest('tr').style.opacity = cb.checked ? '1' : '.5'; };
     });

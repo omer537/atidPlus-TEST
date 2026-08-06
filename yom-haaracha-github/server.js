@@ -391,6 +391,34 @@ function computeTimer(slot) {
   };
 }
 
+// חישוב שעון הסבב — מקור אמת אחד לשלושת המסכים (מנהל · מראיין · נבחן שהגיש).
+// ⚠ נמדד מרגע לחיצת «התחל סבב» (`day_rounds.started_at`), ולא מהרגע שהנבחן
+// הראשון פתח את הפרק — כך המספר זהה אצל כולם ואינו תלוי במי נכנס ראשון.
+// אותה מתמטיקה של `computeTimer`, כולל חשבון ההשהיה.
+function computeRoundTimer(dayId, round) {
+  const none = { round: round || 0, state: 'none', remaining_sec: 0, overtime_sec: 0, duration_sec: 0, started_at: null, ends_at: null };
+  if (!dayId || !round) return none;
+  const r = db.prepare('SELECT * FROM day_rounds WHERE day_id = ? AND round = ?').get(dayId, round);
+  if (!r || r.state !== 'running' || !r.started_at) return none;
+  const durSec = Number(r.duration_sec) || SLOT_DURATION_SEC;
+  const t = now();
+  let pausedSec = Number(r.paused_accum_sec) || 0;
+  if (r.paused && r.paused_at) pausedSec += Math.floor((t - r.paused_at) / 1000);
+  const elapsed = Math.floor((t - r.started_at) / 1000) - pausedSec;
+  const remaining = Math.max(0, durSec - elapsed);
+  return {
+    round,
+    state: r.paused ? 'paused' : (remaining <= 0 ? 'expired' : 'running'),
+    remaining_sec: remaining,
+    // בחריגה סופרים *קדימה*, בלי מספרים שליליים על המסך.
+    overtime_sec: Math.max(0, elapsed - durSec),
+    duration_sec: durSec,
+    started_at: r.started_at,
+    // «מסתיים» כולל את זמן ההשהיה שנצבר, אחרת השעה שמוצגת נסוגה אחורה.
+    ends_at: r.started_at + (durSec + pausedSec) * 1000,
+  };
+}
+
 function getSlot(code, round) {
   return db.prepare('SELECT * FROM slots WHERE code = ? AND round = ?').get(code, round);
 }
@@ -422,6 +450,9 @@ function buildExamineeState(ex) {
     },
     rounds: { current: running, total: total },
     server_now: now(),
+    // ⚠ מחוץ לפיצול ה-phase בכוונה: גם מסך «הפרק הוגש» ומסך ההמתנה צריכים
+    // את שעון הסבב, לא רק phase='chapter'.
+    round_timer: computeRoundTimer(exDayId, running),
   };
 
   // המבחן הסתיים על-ידי הבוחן, או שהיום נסגר (ארכיון) — לפי היום *של הנבחן*
@@ -871,22 +902,19 @@ app.get('/api/interviewer/schedule', authInterviewer, (req, res) => {
   const running = currentRunningRound();
   const roundsArr = db.prepare('SELECT round, state, started_at FROM day_rounds WHERE day_id = ? ORDER BY round').all(activeDayId());
 
-  // חלון הזמן של הסבב הרץ — נגזר מהמשבצות הפעילות (אותו טיימר של הנבחנים)
-  let current = null;
-  if (running) {
-    const row = db.prepare(`SELECT MIN(s.started_at) AS started, MAX(s.duration_sec) AS dur
-                            FROM slots s JOIN examinees e ON e.code = s.code
-                            WHERE s.round = ? AND e.day_id = ? AND s.started_at IS NOT NULL`).get(running, activeDayId());
-    const rstate = roundsArr.find((r) => r.round === running) || {};
-    const startedAt = (row && row.started) || rstate.started_at || null;
-    const durSec = (row && row.dur) || SLOT_DURATION_SEC;
-    current = {
-      round: running,
-      started_at: startedAt,
-      ends_at: startedAt ? startedAt + durSec * 1000 : null,
-      duration_sec: durSec,
-    };
-  }
+  // חלון הזמן של הסבב הרץ — מ-`computeRoundTimer`, אותו מקור בדיוק כמו במסך
+  // המנהל ובמסך הנבחן. ⚠ בעבר זה נגזר מ-MIN(slots.started_at), כלומר מהרגע
+  // שהנבחן הראשון פתח את הפרק, ולכן הראה מספר אחר מזה של המנהל.
+  const rt = computeRoundTimer(activeDayId(), running);
+  const current = running ? {
+    round: running,
+    started_at: rt.started_at,
+    ends_at: rt.ends_at,
+    duration_sec: rt.duration_sec,
+    remaining_sec: rt.remaining_sec,
+    overtime_sec: rt.overtime_sec,
+    state: rt.state,
+  } : null;
 
   const marks = db.prepare(`SELECT m.round, m.code, e.name, e.interview_brief, e.interviewed, e.in_interview, e.status
                             FROM interview_marks m JOIN examinees e ON e.code = m.code
@@ -1298,7 +1326,11 @@ app.post('/api/examiner/start-round', authExaminer, (req, res) => {
     insSlot.run(ex.code, r, act.kind, act.subject, act.level, act.chapter_id, SLOT_DURATION_SEC);
     if (act.kind === 'interview') interviews++; else chapters++;
   }
-  db.prepare("UPDATE day_rounds SET state = 'running', started_at = ?, released = 1, released_at = ? WHERE day_id = ? AND round = ?").run(now(), now(), activeDayId(), r);
+  // שעון הסבב מתחיל כאן — זו נקודת האמת היחידה. ההשהיה מתאפסת למקרה שהסבב
+  // אופס וחזר להתחיל אחרי «השהה את כולם».
+  db.prepare(`UPDATE day_rounds SET state = 'running', started_at = ?, released = 1, released_at = ?,
+              duration_sec = ?, paused = 0, paused_at = NULL, paused_accum_sec = 0
+              WHERE day_id = ? AND round = ?`).run(now(), now(), SLOT_DURATION_SEC, activeDayId(), r);
   logEvent(null, 'start_round', `round ${r} · ${interviews} ריאיון · ${chapters} פרק`);
   // מי שטרם בחר מקצועות לא קיבל פרק — אבל יצטרף אוטומטית ברגע שיבחר (תיקון עצמי ב-complete-setup)
   const noSubjects = examinees
@@ -1326,10 +1358,18 @@ app.post('/api/examiner/end-round', authExaminer, (req, res) => {
       if (ex) pushChapterAnswers(ex, s);
     }
   }
+  // מי נחתך באמצע — נאסף *לפני* הסגירה, כי אחרי ה-UPDATE אי אפשר להבדיל
+  // בין מי שהגיש בעצמו לבין מי שהסבב נסגר עליו. התשובות עצמן נשמרות תמיד
+  // (`answers` ממופתח לפי chapter_id, לא לפי סבב), רק המשבצת נסגרת.
+  const unsubmitted = db.prepare(`SELECT s.code, s.subject, e.name,
+                                    (SELECT COUNT(*) FROM answers a WHERE a.code = s.code AND a.chapter_id = s.chapter_id) AS answered
+                                  FROM slots s JOIN examinees e ON e.code = s.code
+                                  WHERE s.round = ? AND s.kind = 'chapter' AND s.status != 'done' AND e.day_id = ?
+                                  ORDER BY e.name`).all(r, activeDayId());
   db.prepare("UPDATE slots SET status = 'done' WHERE round = ? AND status != 'done'" + DAY_SCOPE).run(r, activeDayId());
   db.prepare("UPDATE day_rounds SET state = 'ended' WHERE day_id = ? AND round = ?").run(activeDayId(), r);
-  logEvent(null, 'end_round', String(r));
-  res.json({ ok: true, round: r });
+  logEvent(null, 'end_round', String(r) + (unsubmitted.length ? ` · ${unsubmitted.length} טרם הגישו: ${unsubmitted.map((u) => u.name).join(', ')}` : ' · כולם הגישו'));
+  res.json({ ok: true, round: r, unsubmitted, unsubmitted_count: unsubmitted.length });
 });
 
 // איפוס סבב — מבטל את הסבב הנוכחי (מוחק את המשבצות שלו) ומחזיר ל-planned. התשובות נשמרות.
@@ -1344,7 +1384,9 @@ app.post('/api/examiner/reset-round', authExaminer, (req, res) => {
   // לפני המשבצת, והנבחן היה נשאר קפוא במסך הריאיון לכל שאר היום.
   db.prepare('UPDATE examinees SET in_interview = 0 WHERE day_id = ? AND code IN (SELECT code FROM slots WHERE round = ?)').run(activeDayId(), r);
   db.prepare('DELETE FROM slots WHERE round = ?' + DAY_SCOPE).run(r, activeDayId());
-  db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ? AND round = ?").run(activeDayId(), r);
+  db.prepare(`UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL,
+              duration_sec = NULL, paused = 0, paused_at = NULL, paused_accum_sec = 0
+              WHERE day_id = ? AND round = ?`).run(activeDayId(), r);
   logEvent(null, 'reset_round', String(r));
   res.json({ ok: true, round: r });
 });
@@ -1367,7 +1409,9 @@ app.post('/api/examiner/full-reset', authExaminer, (req, res) => {
   db.prepare('DELETE FROM slots WHERE code IN (SELECT code FROM examinees WHERE day_id = ?)').run(dayId);
   db.prepare('DELETE FROM answers WHERE code IN (SELECT code FROM examinees WHERE day_id = ?)').run(dayId);
   db.prepare('UPDATE examinees SET interviewed = 0, in_interview = 0 WHERE day_id = ?').run(dayId);
-  db.prepare("UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL WHERE day_id = ?").run(dayId);
+  db.prepare(`UPDATE day_rounds SET state = 'planned', started_at = NULL, released = 0, released_at = NULL,
+              duration_sec = NULL, paused = 0, paused_at = NULL, paused_accum_sec = 0
+              WHERE day_id = ?`).run(dayId);
   setExamEnded(false);
   logEvent(null, 'full_reset', 'יום ' + dayId);
   res.json({ ok: true });
@@ -1885,6 +1929,9 @@ app.get('/api/examiner/status', authExaminer, (req, res) => {
   const d = activeDay();
   res.json({
     running, total_rounds: totalRounds(), rounds: roundsArr, examinees: list,
+    // שעון הסבב + שעון השרת — בלי `server_now` הלקוח לא יכול לתקן סחף שעון.
+    round_timer: computeRoundTimer(activeDayId(), running),
+    server_now: now(),
     day: d ? {
       id: d.id, name: d.name, title: d.title, total_rounds: d.total_rounds, phase: d.phase,
       // נדרשים למסך: אינדיקציית «המבחן הסתיים»/«יום סגור» ותצוגת הודעת הסיום
@@ -2131,6 +2178,18 @@ app.post('/api/examiner/pause-all', authExaminer, (req, res) => {
       const add = s.paused_at ? Math.floor((t - s.paused_at) / 1000) : 0;
       db.prepare('UPDATE slots SET paused = 0, paused_at = NULL, paused_accum_sec = paused_accum_sec + ? WHERE code = ? AND round = ?').run(add, s.code, r);
       n++;
+    }
+  }
+  // ⚠ גם שעון הסבב עצמו — אחרת בהשהיה כללית הספירה שהמנהל והנבחנים רואים
+  // ממשיכה לרוץ ומשקרת. מתבצע תמיד, גם אם 0 משבצות הושפעו.
+  const dr = db.prepare('SELECT paused, paused_at FROM day_rounds WHERE day_id = ? AND round = ?').get(activeDayId(), r);
+  if (dr) {
+    if (pause && !dr.paused) {
+      db.prepare('UPDATE day_rounds SET paused = 1, paused_at = ? WHERE day_id = ? AND round = ?').run(t, activeDayId(), r);
+    } else if (!pause && dr.paused) {
+      const add = dr.paused_at ? Math.floor((t - dr.paused_at) / 1000) : 0;
+      db.prepare('UPDATE day_rounds SET paused = 0, paused_at = NULL, paused_accum_sec = paused_accum_sec + ? WHERE day_id = ? AND round = ?')
+        .run(add, activeDayId(), r);
     }
   }
   logEvent(null, pause ? 'pause_all' : 'resume_all', `round ${r} · ${n} נבחנים` + (skipped ? ` · ${skipped} בריאיון (דולגו)` : ''));
@@ -2456,7 +2515,15 @@ function buildSheetRows(cohortId) {
     // (רק הרב-ברירה נספרה) וזה נראה כמו תוצאה אמיתית.
     const tTot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=?').get(cohortId, gx.code).n;
     const tDone = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND (ai_status='done' OR human_scores_json IS NOT NULL)").get(cohortId, gx.code).n;
+    // ⚠ «טרם נבדק» בלי סיבה שלח את המשתמש לחפש. מפרטים כמה חסרים ומה מקורם,
+    // כי פריט שנכשל דורש ציון ידני ולא סתם המתנה.
+    let pendingReason = '';
+    if (tTot > tDone) {
+      const nFailed = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND ai_status='failed' AND human_scores_json IS NULL").get(cohortId, gx.code).n;
+      pendingReason = (tTot - tDone) + ' תשובות בלי ציון' + (nFailed ? ' · ' + nFailed + ' נכשלו ודורשות ציון ידני' : ' · טרם רצה בדיקת AI');
+    }
     return {
+      pendingReason: pendingReason,
       code: gx.code, name: gx.name, day: dayLabel, cohortId: cohortId,
       include: !!gx.include_in_sheet, locked: !!gx.locked, partial: !!gx.partial,
       teachTotal: tTot, teachGraded: tDone, pending: tTot > tDone,
@@ -2489,7 +2556,10 @@ async function runGradingJob(cohortId, items, cfg, job) {
   job.groups = groups.length;
   let gidx = 0;
   const affected = new Set();
-  const upd = db.prepare('UPDATE grading_items SET ai_scores_json=?, ai_conclusion=?, ai_attention=?, ai_confidence=?, ai_status=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?');
+  const upd = db.prepare('UPDATE grading_items SET ai_scores_json=?, ai_conclusion=?, ai_attention=?, ai_confidence=?, ai_status=?, ai_demo=? WHERE cohort_id=? AND code=? AND chapter_id=? AND item_id=?');
+  // ⚠ בלי מפתח API הציונים הם הדגמה לפי אורך התשובה. מסמנים אותם במסד כדי
+  // שיהיה אפשר לבדוק אותם מחדש אחרי שמוסיפים מפתח (`only_demo`).
+  const isDemo = cfg && cfg.apiKey ? 0 : 1;
 
   async function worker() {
     while (gidx < groups.length) {
@@ -2519,7 +2589,7 @@ async function runGradingJob(cohortId, items, cfg, job) {
       asked.forEach((x) => {
         const r = byKey[x.key] || { ok: false, criteria: {}, conclusion: 'לא חזר ציון לפריט.', attention: 'יש לבדוק ידנית.', confidence: 'low' };
         upd.run(JSON.stringify(r.criteria || {}), r.conclusion || '', r.attention || '', r.confidence || '',
-          r.ok ? 'done' : 'failed', cohortId, x.gi.code, x.gi.chapter_id, x.gi.item_id);
+          r.ok ? 'done' : 'failed', isDemo, cohortId, x.gi.code, x.gi.chapter_id, x.gi.item_id);
         affected.add(x.gi.code);
         if (r.ok) job.done++; else job.failed++;   // ההתקדמות נמדדת בפריטים, לא בקריאות
       });
@@ -2682,8 +2752,9 @@ app.get('/api/examiner/grading/cohorts', authExaminer, (req, res) => {
     const tot = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=?').get(c.id).n;
     const done = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='done'").get(c.id).n;
     const locked = db.prepare('SELECT COUNT(*) AS n FROM grading_examinees WHERE cohort_id=? AND locked=1').get(c.id).n;
+    const demoN = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_demo=1').get(c.id).n;
     const job = gradingJobs[c.id];
-    return { id: c.id, name: c.name, created_at: c.created_at, status: c.status, examinees: exN, teachItems: tot, aiDone: done, locked: locked, running: !!(job && job.running) };
+    return { id: c.id, name: c.name, created_at: c.created_at, status: c.status, examinees: exN, teachItems: tot, aiDone: done, demoItems: demoN, locked: locked, running: !!(job && job.running) };
   });
   res.json({ cohorts: cohorts, demo: !aiGrade.hasApiKey() });
 });
@@ -2701,8 +2772,9 @@ app.get('/api/examiner/grading/cohort/:id', authExaminer, (req, res) => {
       teachTotal: tot, aiDone: done, reviewed: reviewed, final: roll.final_1to5, teaching: roll.teaching_t, content: roll.content_c, topDomain: roll.top_domain, rank: roll.rank };
   });
   const failed = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_status='failed'").get(id).n;
+  const demoItems = db.prepare('SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND ai_demo=1').get(id).n;
   res.json({ cohort: { id: cohort.id, name: cohort.name, status: cohort.status, created_at: cohort.created_at },
-    examinees: examinees, failed: failed, demo: !aiGrade.hasApiKey(), job: gradingJobs[id] || null });
+    examinees: examinees, failed: failed, demoItems: demoItems, demo: !aiGrade.hasApiKey(), job: gradingJobs[id] || null });
 });
 
 // בדיקת חיבור — קריאה אחת זולה לפני שמשגרים עשרות. חובה לפני הרצה מלאה.
@@ -2717,16 +2789,34 @@ app.post('/api/examiner/grading/run-ai', authExaminer, (req, res) => {
   const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
   if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
   if (gradingJobs[id] && gradingJobs[id].running) return res.json({ ok: true, already: true, job: gradingJobs[id] });
-  // only_failed=true → «נסה שוב את מה שנכשל» בלבד, בלי לגעת במה שכבר נבדק.
+  const cfg = aiGrade.loadConfig();
+  // ⚠ המלכודת החמורה ביותר במסך הזה: הרצה בלי מפתח API כותבת ציוני הדגמה
+  // (לפי אורך התשובה בלבד) עם ai_status='done'. מכיוון ש-run-ai בוחר רק
+  // ai_status!='done', לחיצה חוזרת *אחרי* הוספת המפתח הייתה מחזירה «הכול כבר
+  // נבדק» — והנתונים המזויפים היו נשארים בלי שאיש ידע. לכן: חסימה מפורשת.
+  const confirmDemo = !!(req.body && req.body.confirm_demo);
+  if (!cfg.apiKey && !confirmDemo) {
+    return res.status(400).json({
+      demo_block: true,
+      error: 'לא הוגדר מפתח API (ANTHROPIC_API_KEY). הרצה עכשיו תיתן ציוני הדגמה לפי אורך התשובה בלבד — לא לפי התוכן.',
+    });
+  }
+  // only_failed → «נסה שוב את מה שנכשל». only_demo → בדיקה מחדש של ציוני הדגמה.
   const onlyFailed = !!(req.body && req.body.only_failed);
+  const onlyDemo = !!(req.body && req.body.only_demo);
+  if (onlyDemo) {
+    // מחזירים אותם ל-pending כדי שהמנוע יתייחס אליהם כאילו לא נבדקו מעולם.
+    db.prepare("UPDATE grading_items SET ai_status='pending' WHERE cohort_id=? AND ai_demo=1").run(id);
+  }
   const pending = onlyFailed
     ? db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status='failed'").all(id)
-    : db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status!='done'").all(id);
+    : onlyDemo
+      ? db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_demo=1").all(id)
+      : db.prepare("SELECT * FROM grading_items WHERE cohort_id=? AND ai_status!='done'").all(id);
   if (!pending.length) return res.json({ ok: true, nothing: true, total: 0 });
   const groups = groupItemsByQuestion(pending, aiGrade.BATCH_SIZE).length;
-  const job = { total: pending.length, done: 0, failed: 0, running: true, startedAt: now(), groups: groups, groupsDone: 0 };
+  const job = { total: pending.length, done: 0, failed: 0, running: true, startedAt: now(), groups: groups, groupsDone: 0, demo: !cfg.apiKey };
   gradingJobs[id] = job;
-  const cfg = aiGrade.loadConfig();
   runGradingJob(id, pending, cfg, job).catch((e) => { job.running = false; job.error = String(e && e.message); });
   res.json({ ok: true, started: true, total: pending.length, groups: groups, demo: !cfg.apiKey });
 });
@@ -2973,6 +3063,15 @@ app.post('/api/examiner/grading/item', authExaminer, (req, res) => {
   }
   const note = (b.note != null) ? String(b.note).slice(0, 1000) : gi.human_note;
   const wasEdited = !!humanJson;
+  // ⚠ פריט שנכשל בבדיקת ה-AI ואין לו ציון אנושי — «אשר» עליו היה משנה רק את
+  // `status` בלי לכתוב ציון, והנבחן היה נשאר «טרם נבדק» בגיליון לנצח בלי שום
+  // חיווי (`pending` דורש ai_status='done' OR human_scores_json IS NOT NULL).
+  if (b.approve === true && gi.ai_status === 'failed' && !humanJson) {
+    return res.status(400).json({
+      needs_manual_score: true,
+      error: 'הפריט נכשל בבדיקת ה-AI. יש לתת לו ציון ידני (לחיצה על הנקודות) לפני האישור — אחרת הנבחן יישאר בלי ציון סופי.',
+    });
+  }
   let status = gi.status;
   if (b.approve === true) status = 'approved';                                   // נעילת השאלה (גם אם נערכה)
   else if (b.approve === false) status = wasEdited ? 'edited' : 'pending';        // פתיחת השאלה מחדש
@@ -2991,13 +3090,18 @@ app.post('/api/examiner/grading/lock', authExaminer, (req, res) => {
   const gx = db.prepare('SELECT * FROM grading_examinees WHERE cohort_id=? AND code=?').get(cohortId, b.code);
   if (!gx) return res.status(404).json({ error: 'לא נמצא.' });
   const locked = b.locked ? 1 : 0;
-  if (locked) db.prepare("UPDATE grading_items SET status='approved' WHERE cohort_id=? AND code=? AND status='pending'").run(cohortId, b.code);
+  // ⚠ נעילה מאשרת אוטומטית את מה שנשאר pending — אבל *לא* פריט שנכשל ואין לו
+  // ציון ידני. אחרת הנבחן היה נראה «ננעל ✓» ובכל זאת בלי ציון סופי בגיליון.
+  if (locked) {
+    db.prepare("UPDATE grading_items SET status='approved' WHERE cohort_id=? AND code=? AND status='pending' AND NOT (ai_status='failed' AND human_scores_json IS NULL)").run(cohortId, b.code);
+  }
+  const stuck = db.prepare("SELECT COUNT(*) AS n FROM grading_items WHERE cohort_id=? AND code=? AND ai_status='failed' AND human_scores_json IS NULL").get(cohortId, b.code).n;
   db.prepare('UPDATE grading_examinees SET locked=?, reviewer=? WHERE cohort_id=? AND code=?').run(locked, 'examiner', cohortId, b.code);
   logGradeAudit(cohortId, b.code, null, null, 'locked', gx.locked, locked);
   const cfg = cohortConfig(db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(cohortId));
   const roll = computeAndStoreRollup(cohortId, b.code, cfg);
   recomputeRanks(cohortId);
-  res.json({ ok: true, locked: !!locked, rollup: roll });
+  res.json({ ok: true, locked: !!locked, rollup: roll, stuck_failed: stuck });
 });
 
 app.post('/api/examiner/grading/examinee-flags', authExaminer, (req, res) => {
@@ -3007,8 +3111,18 @@ app.post('/api/examiner/grading/examinee-flags', authExaminer, (req, res) => {
   if (!gx) return res.status(404).json({ error: 'לא נמצא.' });
   const include = (b.include != null) ? (b.include ? 1 : 0) : gx.include_in_sheet;
   const note = (b.note != null) ? String(b.note).slice(0, 2000) : gx.note;
-  db.prepare('UPDATE grading_examinees SET include_in_sheet=?, note=? WHERE cohort_id=? AND code=?').run(include, note, cohortId, b.code);
-  res.json({ ok: true });
+  // ⚠ תיקון שם *בתוך הצילום*. נדרש כי הצילום קפוא ו-`edit-examinee` נוגע רק
+  // בנבחני היום החי — ויש נבחנים שנרשמו עם מספר טלפון במקום שם, מה שחוסם את
+  // ההתאמה לבורד במאנדיי.
+  let name = gx.name;
+  if (b.name != null) {
+    const nm = String(b.name).trim().slice(0, 120);
+    if (!nm) return res.status(400).json({ error: 'שם ריק.' });
+    name = nm;
+  }
+  db.prepare('UPDATE grading_examinees SET include_in_sheet=?, note=?, name=? WHERE cohort_id=? AND code=?').run(include, note, name, cohortId, b.code);
+  if (name !== gx.name) logGradeAudit(cohortId, b.code, null, null, 'name', gx.name, name);
+  res.json({ ok: true, name: name });
 });
 
 app.post('/api/examiner/grading/recompute', authExaminer, (req, res) => {
@@ -3056,21 +3170,117 @@ function sheetRowToExcel(r) {
 }
 function writeSheetBook(sheets) {
   const wb = XLSX.utils.book_new();
-  sheets.forEach(function (s) {
+  const used = new Set();
+  sheets.forEach(function (s, i) {
     const ws = XLSX.utils.json_to_sheet(s.rows.map(sheetRowToExcel), { header: SHEET_HEADER });
     ws['!views'] = [{ RTL: true }];
     ws['!cols'] = SHEET_COLS;
-    XLSX.utils.book_append_sheet(wb, ws, s.title.slice(0, 30));
+    // ⚠ slice(0,30) לבדו הפיל את הייצוא: תווית יום עם : \ / ? * [ ] או שתי
+    // תוויות שנחתכות לאותו טקסט גורמות ל-book_append_sheet לזרוק.
+    let title = safeSheetName(s.title, 'גיליון ' + (i + 1));
+    while (used.has(title)) title = safeSheetName(title.slice(0, 27) + '_' + (i + 1), 'גיליון ' + (i + 1));
+    used.add(title);
+    XLSX.utils.book_append_sheet(wb, ws, title);
   });
   return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
+// מיון אופציונלי לפי שם — המסלול לייבוא-קובץ במאנדיי (שמתאים לפי שם).
+// בלי הפרמטר נשמר הסדר ההיסטורי: ציון יורד.
+function sortSheetRows(rows, mode) {
+  if (mode !== 'name') return rows;
+  return rows.slice().sort((a, b) => nameMatch.normBasic(a.name).localeCompare(nameMatch.normBasic(b.name), 'he'));
+}
+
+// ============================================================
+//  ייצוא למאנדיי — «הבורד קובע את סדר השורות»
+// ============================================================
+// הקושי בהדבקה לבורד קיים הוא *יישור שורות*, לא הפורמט: הגיליון שלנו ממוין
+// לפי ציון יורד, והבורד ממוין איך שהוא ממוין. במקום לנחש — המשתמש מדביק את
+// עמודת השם מהבורד, ואנחנו מחזירים בדיוק אותן שורות, באותו סדר.
+// שורה שלא הותאמה חוזרת *ריקה אבל קיימת*, אחרת כל מה שאחריה יזוז.
+const MONDAY_COLS = ['ציון', 'רב-מלל', 'כמותי', 'אנגלית'];
+
+app.post('/api/examiner/grading/monday-match', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const wantKeys = Array.isArray(b.keys);
+  const names = Array.isArray(b.names) ? b.names : String(b.names || '').split('\n');
+  if (!wantKeys && !names.length) return res.status(400).json({ error: 'לא הודבקו שמות.' });
+  if (names.length > 2000) return res.status(400).json({ error: 'יותר מדי שורות (מקסימום 2000).' });
+
+  // ברירת מחדל: כל המחזורים — הבורד בדרך כלל מכיל את כל ימי ההערכה יחד.
+  // ⚠ חובה לנקות כפילויות: אותו מזהה פעמיים היה מכניס כל נבחן פעמיים לבריכה,
+  // וכל שם היה נראה «מעורפל» בלי סיבה.
+  let ids = Array.isArray(b.cohorts) ? Array.from(new Set(b.cohorts.map(Number).filter(Boolean))) : [];
+  if (!ids.length) ids = db.prepare('SELECT id FROM grading_cohorts ORDER BY id').all().map((c) => c.id);
+
+  // כל השורות מכל המחזורים, מאותו מקור בדיוק שבונה את הגיליון — כדי שלא יהיו
+  // שני מספרים שונים לאותו אדם.
+  const pool = [];
+  for (const id of ids) {
+    const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
+    if (!cohort) continue;
+    buildSheetRows(id).forEach((r) => pool.push(Object.assign({ cohort_id: id }, r)));
+  }
+  // מפתח ההתאמה חייב להיות ייחודי בין מחזורים — code לבדו חוזר בין ימים.
+  const candidates = pool.map((r) => ({ code: r.cohort_id + ':' + r.code, name: r.name }));
+  const byKey = {};
+  pool.forEach((r) => { byKey[r.cohort_id + ':' + r.code] = r; });
+
+  const vals = (r) => (r && !r.pending
+    ? { final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english }
+    // ⚠ מספרים בלבד. עמודת Number במאנדיי דוחה את המחרוזת «טרם נבדק».
+    : { final: null, ravMelel: null, quant: null, english: null });
+  const brief = (key) => {
+    const r = byKey[key];
+    return r ? { key: key, code: r.code, cohort_id: r.cohort_id, name: r.name, day: r.day || '' } : null;
+  };
+
+  // ⚠ בחירה ידנית מההצעות חייבת לשלוף לפי *מפתח*, לא לחפש את השם שוב: השם
+  // הזה בדיוק הוא זה שהיה מעורפל מלכתחילה, וחיפוש חוזר יחזיר שוב «לא הוכרע».
+  if (wantKeys) {
+    const out = {};
+    b.keys.forEach((k) => { const r = byKey[k]; if (r) out[k] = Object.assign({ pending: !!r.pending, name: r.name, day: r.day || '' }, vals(r)); });
+    return res.json({ ok: true, columns: MONDAY_COLS, values: out });
+  }
+
+  const rows = names.map((raw, i) => {
+    const line = String(raw == null ? '' : raw).trim();
+    const out = {
+      line: i + 1, raw: line, matched: null, suggestions: [],
+      values: vals(null), pending: false, ambiguous: false, blank: !line,
+    };
+    if (!line) return out;
+    const m = nameMatch.matchName(line, candidates);
+    if (m.exact) {
+      out.matched = brief(m.exact.code);
+      const r = byKey[m.exact.code];
+      out.values = vals(r); out.pending = !!(r && r.pending);
+      return out;
+    }
+    out.suggestions = (m.suggestions || []).map((s) => Object.assign(brief(s.code) || {}, { reason: s.reason, confidence: s.confidence }));
+    // אותו שם בשני מחזורים (אותו אדם בשני ימים / כפילות) — לא מכריעים לבד.
+    out.ambiguous = out.suggestions.length > 1;
+    return out;
+  });
+
+  const matchedN = rows.filter((r) => r.matched).length;
+  res.json({
+    ok: true, columns: MONDAY_COLS, rows: rows,
+    total: rows.length,
+    blank: rows.filter((r) => r.blank).length,
+    matched: matchedN,
+    unmatched: rows.filter((r) => !r.blank && !r.matched).length,
+    pending: rows.filter((r) => r.pending).length,
+    pool: pool.length,
+  });
+});
 
 app.get('/api/examiner/grading/export-sheet/:id', authExaminer, (req, res) => {
   const id = Number(req.params.id);
   const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
   if (!cohort) return res.status(404).json({ error: 'מחזור לא נמצא.' });
   const all = req.query.all === '1';
-  const rows = buildSheetRows(id).filter((r) => all || r.include);
+  const rows = sortSheetRows(buildSheetRows(id).filter((r) => all || r.include), req.query.sort);
   const buf = writeSheetBook([{ title: 'ציונים', rows: rows }]);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   setDownloadName(res, 'grades-' + id + '.xlsx');
@@ -3087,12 +3297,13 @@ app.get('/api/examiner/grading/export-merged', authExaminer, (req, res) => {
   for (const id of ids) {
     const cohort = db.prepare('SELECT * FROM grading_cohorts WHERE id=?').get(id);
     if (!cohort) continue;
-    const rows = buildSheetRows(id).filter((r) => all || r.include);
+    const rows = sortSheetRows(buildSheetRows(id).filter((r) => all || r.include), req.query.sort);
     sheets.push({ title: (cohort.day_label || cohort.name || ('מחזור ' + id)), rows: rows });
     everything.push.apply(everything, rows);
   }
   if (!sheets.length) return res.status(404).json({ error: 'לא נמצאו מחזורים.' });
-  everything.sort((a, b) => (b.final || 0) - (a.final || 0));
+  if (req.query.sort === 'name') everything.sort((a, b) => nameMatch.normBasic(a.name).localeCompare(nameMatch.normBasic(b.name), 'he'));
+  else everything.sort((a, b) => (b.final || 0) - (a.final || 0));
   const buf = writeSheetBook([{ title: 'הכול', rows: everything }].concat(sheets));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   setDownloadName(res, 'grades-merged.xlsx');

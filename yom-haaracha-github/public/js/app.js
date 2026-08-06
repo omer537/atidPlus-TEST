@@ -34,6 +34,9 @@
     state: null,
     renderedKey: null,
     timer: { state: 'none', remaining: 0, syncAt: 0 },
+    // שעון הסבב (לא של הפרק) — מוצג במסך «הפרק הוגש»/«ממתינים», מסונכרן
+    // עם המספר שהמנהל והמראיינים רואים.
+    roundTimer: { state: 'none', remaining: 0, syncAt: 0 },
     itemStart: {},
     saveTimers: {},
     pollHandle: null,
@@ -497,6 +500,8 @@
     var s = App.state;
     if (!s) return;
     root.className = 'wrap';
+    // ⚠ לפני פיצול ה-phase: גם מסך «הפרק הוגש» צריך את שעון הסבב.
+    if (s.round_timer) syncRoundTimer(s.round_timer);
 
     // נבחן שנפתח לו משתמש מראש — משלים הצהרה ובחירת נושאים בעצמו (דרך מסך ההוראות)
     if (s.phase === 'needs_setup') {
@@ -533,6 +538,16 @@
       interview: 'סבב הריאיון שלך', waiting: 'ממתינים לסבב הבא', submitted: 'הפרק הוגש',
       ended: 'המבחן הסתיים', finished: 'סיימת — כל הכבוד!', registered_waiting: 'נרשמת בהצלחה',
     };
+    // ספירה לאחור עד סוף הסבב — רק כשיש סבב רץ. אותו מספר בדיוק שהמנהל רואה.
+    var rtHtml = '';
+    var rt = App.state && App.state.round_timer;
+    if ((kind === 'waiting' || kind === 'submitted') && rt && rt.state !== 'none') {
+      rtHtml = '<div class="round-wait">' +
+        '<span class="lbl">' + (rt.state === 'paused' ? 'הסבב מושהה' : 'הפרק הבא ייפתח בעוד') + '</span>' +
+        '<b id="round-timer">' + fmtClock(rt.remaining_sec) + '</b>' +
+        '<span class="note" id="round-timer-note"></span>' +
+        '</div>';
+    }
     var footer = (kind === 'waiting' || kind === 'submitted')
       ? '<p style="margin-top:18px;color:var(--faint);font-size:14px">המסך יתעדכן אוטומטית כשהבוחן ישחרר את הסבב הבא.</p>'
       : (kind === 'registered_waiting'
@@ -552,10 +567,12 @@
       '<div class="card"><div class="big-state">' +
       '<div class="glyph">' + (icons[kind] || icons.waiting) + '</div>' +
       '<h2>' + (titles[kind] || 'ממתינים') + '</h2>' +
-      '<p>' + esc(message || '') + '</p>' + whereHtml + footer +
+      '<p>' + esc(message || '') + '</p>' + whereHtml + rtHtml + footer +
       '</div></div></div>'
     ));
     wireLogout();
+    // הפונקציה בונה את ה-DOM מחדש — לרענן את הספירה מיד אחרי הבנייה.
+    updateRoundTimerDisplay();
   }
 
   function renderChapter(s) {
@@ -795,7 +812,43 @@
     }
     return App.timer.remaining;
   }
-  function tickTimer() { if (App.view === 'exam' && App.state && App.state.phase === 'chapter') updateTimerDisplay(); }
+  function tickTimer() {
+    if (App.view !== 'exam' || !App.state) return;
+    if (App.state.phase === 'chapter') updateTimerDisplay();
+    // שעון הסבב רץ גם אחרי ההגשה — שם דווקא הוא הדבר היחיד שמעניין.
+    else if (App.state.phase === 'submitted' || App.state.phase === 'waiting') updateRoundTimerDisplay();
+  }
+
+  // ---------------------------------------------------------------- שעון הסבב
+  function fmtClock(sec) {
+    var v = Math.max(0, sec || 0);
+    return String(Math.floor(v / 60)).padStart(2, '0') + ':' + String(v % 60).padStart(2, '0');
+  }
+  function syncRoundTimer(t) {
+    App.roundTimer.state = t.state;
+    App.roundTimer.remaining = t.remaining_sec;
+    App.roundTimer.syncAt = Date.now();
+  }
+  function currentRoundRemaining() {
+    if (App.roundTimer.state === 'running') {
+      return Math.max(0, App.roundTimer.remaining - Math.floor((Date.now() - App.roundTimer.syncAt) / 1000));
+    }
+    return App.roundTimer.remaining;
+  }
+  function updateRoundTimerDisplay() {
+    var elm = document.getElementById('round-timer');
+    if (!elm) return; // ⚠ קיים רק במסך ההמתנה/ההגשה
+    var rem = currentRoundRemaining();
+    var note = document.getElementById('round-timer-note');
+    if (App.roundTimer.state === 'expired' || rem <= 0) {
+      // בלי מספרים שליליים — הסבב פשוט עומד להיסגר.
+      elm.textContent = '00:00';
+      if (note) note.textContent = 'הסבב עומד להסתיים — המתן/י להנחיית הבוחן.';
+    } else {
+      elm.textContent = fmtClock(rem);
+      if (note) note.textContent = App.roundTimer.state === 'paused' ? 'השעון עצר לפי הוראת הבוחן.' : '';
+    }
+  }
   function updateTimerDisplay() {
     var elm = document.getElementById('timer');
     if (!elm) return;
