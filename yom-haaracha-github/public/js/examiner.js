@@ -214,7 +214,9 @@ window.AdminApp = (function () {
     var subjCount = S.subject_count || Math.max(1, n - 2);
     var started = (S.rounds || []).some(function (r) { return r.state !== 'planned'; });
     var meta = DAYS.days.filter(function (d) { return d.id === day.id; })[0] || {};
-    var closed = (meta.status || day.status) === 'closed';
+    // ⚠ day.status מגיע טרי מ-/examiner/status בכל רענון; meta מגיע ממטמון DAYS
+    // ש-refresh() לא מרענן. הסדר ההפוך גרם למסך להציג «פתוח» אחרי שהיום נסגר.
+    var closed = (day.status || meta.status) === 'closed';
     var ended = !!day.exam_ended;
     var phaseChip = closed
       ? '<span class="dc-chip closed">יום סגור · בארכיון</span>'
@@ -383,9 +385,18 @@ window.AdminApp = (function () {
       (p ? '<span class="rd-badge ok">צילום ראשי קיים ✓</span>' : '<span class="rd-badge">עדיין לא נשמר צילום ראשי</span>') + '</div>' +
       '<div class="rd-row"><span class="rd-dot ok"></span><span><b>נתוני היום (חי):</b> ' +
       d.live.examinees + ' נבחנים · ' + d.live.answers + ' תשובות — שמורים בבסיס הנתונים על הדיסק הקבוע של השרת, מופרדים לפי יום.</span></div>' +
-      '<div class="rd-row"><span class="rd-dot ' + (p ? 'ok' : 'warn') + '"></span><span><b>צילום לבדיקה:</b> ' +
+      '<div class="rd-row"><span class="rd-dot ' + (p ? (d.stale ? 'warn' : 'ok') : 'warn') + '"></span><span><b>צילום לבדיקה:</b> ' +
       (p ? '«' + esc(p.name) + '» נשמר ב-' + fmtWhenFull(p.created_at) + ' · ' + p.examinees + ' נבחנים · ' + p.answers + ' תשובות'
          : 'טרם נוצר. לחצו «שמור יום» בסוף היום — או «צלם מצב» במסך הבדיקה בכל רגע.') + '</span></div>' +
+      // ⚠ תשובות שהגיעו אחרי הצילום (טלפון שחזר לרשת) לא ינוקדו לעולם.
+      // קודם שני המספרים הוצגו זה לצד זה בירוק, בלי שאף אחד ישווה ביניהם.
+      (d.stale
+        ? '<div class="msg error" style="margin:10px 0 0"><b>⚑ הצילום לא מעודכן.</b> הגיעו ' +
+          d.stale_answers + ' תשובות' + (d.stale_examinees ? ' ו-' + d.stale_examinees + ' נבחנים' : '') +
+          ' <b>אחרי</b> שהיום נסגר — הן קיימות בנתוני היום אבל <b>לא בצילום, ולכן לא ינוקדו</b>. ' +
+          'לחצו «צלם שוב לבדיקה» כדי לכלול אותן.' +
+          '<div class="btn-row" style="margin-top:10px"><button class="btn small" id="sv-resnap">צלם שוב לבדיקה</button></div></div>'
+        : '') +
       (extra.length ? '<div class="rd-row"><span class="rd-dot"></span><span>צילומים נוספים: ' + extra.length + ' (' + extra.map(function (c) { return esc(c.name); }).join(', ') + ')</span></div>' : '') +
       '<p class="hint-text" style="margin-top:8px">הצילום הוא <b>עותק קפוא ונפרד</b> של התשובות — ממנו בודקים ונותנים ציונים. הוא שורד גם אם היום החי יימחק.</p>' +
       '<div class="btn-row"><button class="btn small" id="sv-open-grade">פתח את מסך הבדיקה</button>' +
@@ -404,9 +415,19 @@ window.AdminApp = (function () {
               '<button class="btn ghost small ar-json" data-id="' + d.id + '">JSON</button></div></div>';
           }).join('') + '</div></div>'
         : '');
-    document.getElementById('sv-open-grade').onclick = function () { location.href = '/grade'; };
-    document.getElementById('sv-dl-xls').onclick = downloadExcel;
-    document.getElementById('sv-dl-json').onclick = downloadExport;
+    // ⚠ תמיד עם הגנת null — אלמנט חסר שובר את כל הרינדור (ראו CLAUDE.md)
+    var og = document.getElementById('sv-open-grade'); if (og) og.onclick = function () { location.href = '/grade'; };
+    var dx = document.getElementById('sv-dl-xls'); if (dx) dx.onclick = downloadExcel;
+    var dj = document.getElementById('sv-dl-json'); if (dj) dj.onclick = downloadExport;
+    var rs = document.getElementById('sv-resnap');
+    if (rs) rs.onclick = async function () {
+      rs.disabled = true; rs.textContent = 'מצלם…';
+      try {
+        var r = await call('/examiner/grading/snapshot', 'POST', { name: ((d.day && d.day.name) || 'יום') + ' — מעודכן' });
+        alert('נוצר צילום מעודכן: ' + r.examinees + ' נבחנים · ' + r.answers + ' תשובות.\n\nשימו לב: הצילום החדש אינו מסומן «ראשי». במסך הבדיקה בחרו אותו.');
+        refresh();
+      } catch (e) { alert(e.message); rs.disabled = false; rs.textContent = 'צלם שוב לבדיקה'; }
+    };
     var arAll = document.getElementById('ar-all');
     if (arAll) arAll.onclick = function () {
       downloadBlob('/examiner/export-excel?all_closed=1', 'all-closed-days.xlsx').catch(function (e) { alert(e.message); });
@@ -1006,7 +1027,7 @@ window.AdminApp = (function () {
       controls = '<button class="btn big" id="c-start" data-r="' + firstPlanned + '">התחל סבב ' + firstPlanned + '</button>';
       if (latestActive) controls += '<button class="btn danger ghost" id="c-reset" data-r="' + latestActive + '">בטל/אפס סבב ' + latestActive + '</button>';
     } else {
-      title = 'כל הסבבים הסתיימו 🎉';
+      title = 'כל הסבבים הסתיימו ✓';
       if (latestActive) controls = '<button class="btn danger ghost" id="c-reset" data-r="' + latestActive + '">בטל/אפס סבב ' + latestActive + '</button>';
     }
 

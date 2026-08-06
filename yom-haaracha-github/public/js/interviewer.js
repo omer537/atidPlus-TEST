@@ -8,6 +8,7 @@ window.InterviewerApp = (function () {
   var token = localStorage.getItem('yh_interviewer_token') || null;
   var root = document.getElementById('root');
   var pollHandle = null;
+  var tickHandle = null;   // ⚠ היה setInterval בלי מזהה — דלף בכל כניסה מחדש
   var DATA = null;
 
   function el(html) { var d = document.createElement('div'); d.innerHTML = html.trim(); return d.firstChild; }
@@ -146,7 +147,8 @@ window.InterviewerApp = (function () {
     ));
     document.getElementById('iv-out').onclick = function () {
       localStorage.removeItem('yh_interviewer_token'); token = null;
-      if (pollHandle) clearInterval(pollHandle);
+      if (pollHandle) { clearInterval(pollHandle); pollHandle = null; }
+      if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
       renderLogin();
     };
     root.querySelectorAll('.iv-swap').forEach(function (b) {
@@ -182,8 +184,11 @@ window.InterviewerApp = (function () {
   function start() {
     refresh();
     if (pollHandle) clearInterval(pollHandle);
+    if (tickHandle) clearInterval(tickHandle);
     pollHandle = setInterval(refresh, 5000);
-    setInterval(tick, 1000);
+    // ⚠ בלי מזהה, כל כניסה חוזרת הוסיפה tick נוסף: השעון «נותר» ירד N שניות
+    // בכל שנייה ואז קפץ אחורה כל 5 שניות כשה-poll סנכרן מהשרת.
+    tickHandle = setInterval(tick, 1000);
   }
 
   async function enter() {

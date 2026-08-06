@@ -69,7 +69,12 @@ const LAST = ['לוי', 'כהן', 'בר', 'אמסלם', 'פרץ', 'שגב', 'מ�
   check(st.interviewers.every((v) => v.room), 'לכל מראיין יש חדר');
 
   // רשימת נבחנים מראש
-  const names = Array.from({ length: N }, (_, i) => FIRST[i % FIRST.length] + ' ' + LAST[i % LAST.length]);
+  // ⚠ השם הוא הזהות ולכן חייב להיות ייחודי. עם `LAST[i % 20]` נבחן 21 קיבל
+  // שם זהה לנבחן 1 והמערכת דחתה אותו בצדק — כך N>20 "נכשל" בלי סיבה אמיתית.
+  // חלוקה שלמה נותנת 20×20 = 400 שמות ייחודיים.
+  const names = Array.from({ length: N }, (_, i) =>
+    FIRST[i % FIRST.length] + ' ' + LAST[Math.floor(i / FIRST.length) % LAST.length]);
+  if (new Set(names).size !== N) fail.push('חליפת הבדיקה ייצרה שמות כפולים — N גדול מדי');
   const pins = names.map((_, i) => String(1001 + i));
   await j('/examiner/add-examinees-bulk', 'POST', { text: names.map((n, i) => `${n}, ${pins[i]}`).join('\n') }, tok);
   st = (await j('/examiner/status', null, null, tok)).body;

@@ -81,6 +81,13 @@
     // בתוך 'use strict' עצם *הקריאה* זרקה ReferenceError. התוצאה: נבחן שהחיבור
     // שלו הוחלף נשאר עם מסך תקוע — השורות שמחזירות אותו למסך הכניסה לא רצו.
     if (App.pollHandle) { clearInterval(App.pollHandle); App.pollHandle = null; }
+    if (App.tickHandle) { clearInterval(App.tickHandle); App.tickHandle = null; }
+    // ⚠ חובה לאפס: renderExam מדלג על ציור מחדש כש-`renderedKey` זהה («הפרק
+    // כבר על המסך»). מסך הכניסה מחק את ה-DOM אבל השאיר את המפתח, ולכן אחרי
+    // התחברות מחדש לאותו פרק הציור דילג — הנבחן הקליד שם וקוד, לחץ «כניסה»,
+    // והמסך פשוט לא זז. כל שאר המקומות שמוחקים את המסך כבר מאפסים אותו.
+    App.state = null;
+    App.renderedKey = null;
     App.view = 'login';
     App.loginError = msg || 'החיבור שלך הוחלף (אולי נכנסת ממכשיר אחר). יש להתחבר שוב עם השם והקוד — התשובות שמורות.';
     render();
