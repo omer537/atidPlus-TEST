@@ -140,9 +140,11 @@ window.GradeApp = (function () {
         '</div>' : '') +
       '</div>' +
 
+      (cohorts.length ? mondayApiCardHtml() : '') +
       (cohorts.length ? mondayCardHtml(cohorts) : '');
 
     wireTopbar();
+    wireMondayApi();
     wireMonday();
     // ⚠ תמיד עם הגנת null — אלמנט חסר שובר את כל הרינדור (ראו CLAUDE.md)
     var bs = document.getElementById('btn-snap'); if (bs) bs.onclick = doSnapshot;
@@ -156,11 +158,171 @@ window.GradeApp = (function () {
     root.querySelectorAll('.open-cohort').forEach(function (b) { b.onclick = function () { openCohort(Number(b.getAttribute('data-id'))); }; });
     root.querySelectorAll('.del-cohort').forEach(function (b) { b.onclick = function () { deleteCohort(Number(b.getAttribute('data-id'))); }; });
   }
-  // ================================================= ייצוא למאנדיי
+  // ================================================= שליחה ישירה למאנדיי
+  // ★ המסלול המומלץ. כותב תאים בודדים דרך ה-API ולכן לא נוגע בשום עמודה אחרת
+  // ולא יוצר שורות — בניגוד לייבוא Excel שכותב את הפריט כולו.
+  var MB = { board: null, columns: [], fields: [], rows: [], mapping: {}, manual: {} };
+
+  function mondayApiCardHtml() {
+    return '<div class="card" id="mapi-card">' +
+      '<h2 class="section-title">שלח ישירות למאנדיי</h2>' +
+      '<p class="hint-text">כותב את הציונים אל תוך הבורד שלכם — <b>רק לעמודות שתבחרו</b>. ' +
+      'לא נוגע בשאר העמודות, לא יוצר שורות חדשות, ולא מוחק כלום. ' +
+      'תמיד מוצגת תצוגה מקדימה לפני שנכתב משהו.</p>' +
+      '<div class="btn-row"><button class="btn ghost small" id="mapi-test">בדוק חיבור למאנדיי</button>' +
+      '<button class="btn small" id="mapi-load">טען את הבורדים שלי</button></div>' +
+      '<div id="mapi-msg"></div><div id="mapi-body"></div></div>';
+  }
+
+  function wireMondayApi() {
+    var t = document.getElementById('mapi-test'); if (t) t.onclick = mapiTest;
+    var l = document.getElementById('mapi-load'); if (l) l.onclick = mapiLoadBoards;
+  }
+  function mapiMsg(html) { var b = document.getElementById('mapi-msg'); if (b) b.innerHTML = html; }
+
+  async function mapiTest() {
+    mapiMsg('<div class="msg info">בודק…</div>');
+    try {
+      var r = await call('/examiner/monday/test');
+      mapiMsg('<div class="msg ' + (r.ok ? 'ok' : 'warn') + '">' + esc(r.message) + '</div>');
+    } catch (e) { mapiMsg('<div class="msg error">' + esc(e.message) + '</div>'); }
+  }
+
+  async function mapiLoadBoards() {
+    mapiMsg('<div class="msg info">טוען בורדים…</div>');
+    try {
+      var r = await call('/examiner/monday/boards');
+      var opts = '<option value="">— בחרו בורד —</option>' + (r.boards || []).map(function (b) {
+        return '<option value="' + esc(b.id) + '">' + esc(b.name) + ' (' + (b.items || 0) + ' שורות)</option>';
+      }).join('');
+      mapiMsg('');
+      document.getElementById('mapi-body').innerHTML =
+        '<label class="field" style="max-width:420px;margin-top:12px"><span>הבורד</span>' +
+        '<select id="mapi-board">' + opts + '</select></label><div id="mapi-map"></div>';
+      document.getElementById('mapi-board').onchange = function () { mapiPickBoard(this.value); };
+    } catch (e) { mapiMsg('<div class="msg error">' + esc(e.message) + '</div>'); }
+  }
+
+  async function mapiPickBoard(id) {
+    var box = document.getElementById('mapi-map'); if (!box) return;
+    if (!id) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="msg info">קורא את עמודות הבורד…</div>';
+    try {
+      var r = await call('/examiner/monday/board/' + encodeURIComponent(id));
+      MB.board = r.board; MB.columns = r.columns || []; MB.fields = r.fields || []; MB.mapping = {}; MB.manual = {};
+      if (!MB.columns.length) {
+        box.innerHTML = '<div class="msg warn">לא נמצאו בבורד עמודות מסוג מספר או טקסט. צרו קודם את עמודות הציון.</div>';
+        return;
+      }
+      // ניחוש ראשוני לפי שם העמודה — חוסך מיפוי ידני כשהשמות תואמים
+      MB.fields.forEach(function (f) {
+        var hit = MB.columns.find(function (c) { return c.title.trim() === f.label; });
+        if (hit) MB.mapping[f.field] = hit.id;
+      });
+      renderMapiMapping();
+    } catch (e) { box.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+  }
+
+  function renderMapiMapping() {
+    var box = document.getElementById('mapi-map'); if (!box) return;
+    var rows = MB.fields.map(function (f) {
+      var opts = '<option value="">— לא לשלוח —</option>' + MB.columns.map(function (c) {
+        return '<option value="' + esc(c.id) + '"' + (MB.mapping[f.field] === c.id ? ' selected' : '') + '>' +
+          esc(c.title) + ' (' + esc(c.type) + ')</option>';
+      }).join('');
+      return '<label class="field" style="margin:0"><span>' + esc(f.label) + '</span>' +
+        '<select class="mapi-col" data-f="' + esc(f.field) + '">' + opts + '</select></label>';
+    }).join('');
+    box.innerHTML = '<p class="hint-text" style="margin-top:14px">לאיזו עמודה בבורד לכתוב כל ערך? מה שמסומן «לא לשלוח» — לא ייכתב.</p>' +
+      '<div class="day-grid">' + rows + '</div>' +
+      '<div class="btn-row" style="margin-top:12px"><button class="btn" id="mapi-prev">תצוגה מקדימה</button></div>' +
+      '<div id="mapi-prevbox"></div>';
+    box.querySelectorAll('.mapi-col').forEach(function (s) {
+      s.onchange = function () { MB.mapping[s.getAttribute('data-f')] = s.value; };
+    });
+    var p = document.getElementById('mapi-prev'); if (p) p.onclick = mapiPreview;
+  }
+
+  async function mapiPreview() {
+    var box = document.getElementById('mapi-prevbox'); if (!box) return;
+    box.innerHTML = '<div class="msg info">קורא את הבורד ומתאים שמות…</div>';
+    try {
+      var r = await call('/examiner/monday/preview', 'POST', { board_id: MB.board.id, manual: MB.manual });
+      MB.rows = r.rows || [];
+      renderMapiPreview(r);
+    } catch (e) { box.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+  }
+
+  function renderMapiPreview(r) {
+    var box = document.getElementById('mapi-prevbox'); if (!box) return;
+    var mapped = MB.fields.filter(function (f) { return MB.mapping[f.field]; });
+    var head = '<th>שורה בבורד</th><th>הותאם ל…</th>' + mapped.map(function (f) { return '<th>' + esc(f.label) + '</th>'; }).join('');
+    var body = MB.rows.map(function (row) {
+      var right;
+      if (row.matched) right = '<b style="color:var(--ok)">' + esc(row.matched.name) + '</b>' +
+        (row.pending ? ' <span style="color:var(--warn);font-size:11px">בלי ציון — ידולג</span>' : '');
+      else if (row.suggestions.length) right = '<select class="mapi-pick" data-i="' + esc(row.item_id) + '">' +
+        '<option value="">— דלג —</option>' + row.suggestions.map(function (s) {
+          return '<option value="' + esc(s.key) + '">' + esc(s.name) + ' — ' + esc(s.reason) + '</option>';
+        }).join('') + '</select>';
+      else right = '<span style="color:var(--faint)">אין התאמה — ידולג</span>';
+      var cells = mapped.map(function (f) {
+        var v = row.values[f.field];
+        return '<td>' + (v == null || v === '' ? '<span style="color:var(--faint)">—</span>' : esc(String(v)).slice(0, 60)) + '</td>';
+      }).join('');
+      return '<tr' + (row.matched && !row.pending ? '' : ' style="opacity:.5"') + '>' +
+        '<td>' + esc(row.board_name) + '</td><td>' + right + '</td>' + cells + '</tr>';
+    }).join('');
+
+    box.innerHTML =
+      '<div class="msg ' + (r.will_write ? 'ok' : 'warn') + '" style="margin-top:12px">' +
+      '<b>ייכתבו ' + r.will_write + ' שורות</b> מתוך ' + r.total + ' בבורד' +
+      (r.unmatched ? ' · ' + r.unmatched + ' בלי התאמה (ידולגו)' : '') +
+      (r.pending ? ' · ' + r.pending + ' עדיין בלי ציון (ידולגו)' : '') + '</div>' +
+      '<div style="overflow-x:auto;max-height:44vh;margin-top:10px"><table class="grid"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
+      '<div class="btn-row" style="margin-top:14px">' +
+      '<button class="btn big" id="mapi-push"' + (r.will_write ? '' : ' disabled') + '>שלח ' + r.will_write + ' שורות למאנדיי</button></div>' +
+      '<div id="mapi-result"></div>';
+
+    box.querySelectorAll('.mapi-pick').forEach(function (s) {
+      s.onchange = function () {
+        var id = s.getAttribute('data-i');
+        if (s.value) MB.manual[id] = s.value; else delete MB.manual[id];
+        mapiPreview();   // מריצים שוב כדי לראות את הערכים שייכתבו
+      };
+    });
+    var p = document.getElementById('mapi-push'); if (p) p.onclick = mapiPush;
+  }
+
+  async function mapiPush() {
+    var rows = MB.rows.filter(function (r) { return r.matched && !r.pending; })
+      .map(function (r) { return { item_id: r.item_id, key: r.matched.key, board_name: r.board_name }; });
+    if (!rows.length) return;
+    if (!confirm('לכתוב ' + rows.length + ' שורות לבורד «' + MB.board.name + '»?\n\nרק העמודות שמופו ייכתבו. שאר העמודות לא ישתנו.')) return;
+    var out = document.getElementById('mapi-result');
+    if (out) out.innerHTML = '<div class="msg info">שולח…</div>';
+    try {
+      var r = await call('/examiner/monday/push', 'POST',
+        { board_id: MB.board.id, mapping: MB.mapping, rows: rows });
+      var html = '<div class="msg ' + (r.failed.length ? 'warn' : 'ok') + '" style="margin-top:12px">' +
+        '<b>נכתבו ' + r.written + ' שורות</b>' + (r.skipped ? ' · ' + r.skipped + ' דולגו' : '') +
+        (r.failed.length ? ' · ' + r.failed.length + ' נכשלו' : '') + '</div>';
+      if (r.failed.length) {
+        html += '<div class="msg error">' + r.failed.slice(0, 5).map(function (f) {
+          return esc(f.name || f.item_id) + ' — ' + esc(f.error);
+        }).join('<br>') + '</div>';
+      }
+      if (out) out.innerHTML = html;
+    } catch (e) { if (out) out.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
+  }
+
+  // ================================================= ייצוא למאנדיי (קובץ)
   // הקושי בהדבקה לבורד קיים הוא יישור שורות. הפתרון: הבורד קובע את הסדר —
   // המשתמש מדביק את עמודת השם משם, ואנחנו מחזירים בדיוק אותן שורות באותו סדר.
   var MND = null;      // תוצאת ההתאמה האחרונה
   var mndText = '';    // מה שהודבק — נשמר כדי שרינדור לא ימחק אותו
+  var MNDMULTI = 0;    // כמה שורות הודבקו עם יותר מעמודה אחת
+  var MNDREC = false;  // לכלול עמודת «המלצה»
 
   function mondayCardHtml(cohorts) {
     // ⚠ אותו שם בשני מחזורים (צילום כפול / מועמדת שהגיעה לשני ימים) לא משויך
@@ -171,10 +333,15 @@ window.GradeApp = (function () {
       }).join('') + '</div>'
       : '';
     return '<div class="card" id="monday-card">' +
-      '<h2 class="section-title">ייצוא למאנדיי</h2>' +
-      '<p class="hint-text">במאנדיי: סמנו את <b>עמודת השם</b> של כל השורות ← Copy. הדביקו כאן ולחצו «התאם». ' +
-      'תקבלו את אותן שורות <b>בדיוק באותו סדר</b> עם ארבע עמודות הציון — לחצו «העתק» ובמאנדיי עמדו על התא הראשון ' +
-      'של עמודת «ציון» ועשו Paste. שורה שלא הותאמה יוצאת ריקה, כדי שהיישור יישמר.</p>' +
+      '<h2 class="section-title">ייצוא למאנדיי — קובץ (מסלול גיבוי)</h2>' +
+      '<p class="hint-text">אם השליחה הישירה למעלה לא זמינה. ⚠ ייבוא הקובץ במאנדיי כותב את ' +
+      'הפריט <b>כולו</b>, ולכן עלול לרוקן עמודות שאינן בקובץ — נסו קודם על בורד משוכפל.</p>' +
+      '<p class="hint-text"><b>1.</b> במאנדיי: תפריט הבורד ← <b>Export board to Excel</b>. ' +
+      '<b>2.</b> פותחים את הקובץ, מעתיקים את עמודת השם (או את כל השורות — ניקח את העמודה הראשונה) ומדביקים כאן. ' +
+      '<b>3.</b> «התאם» ← בודקים את הטבלה ומסדירים שמות שלא זוהו. ' +
+      '<b>4.</b> «הורד קובץ ייבוא» ← במאנדיי מייבאים אותו עם <b>Overwrite existing items</b> לפי עמודת השם.</p>' +
+      '<div class="msg warn" style="margin-bottom:10px">בפעם הראשונה — <b>שכפלו את הבורד</b> ' +
+      '(Duplicate board with items) ונסו עליו. כך תראו בדיוק מה הייבוא עושה לשאר העמודות, בלי סיכון.</div>' +
       (picker ? '<p class="hint-text" style="margin-bottom:4px">באילו מחזורים לחפש:</p>' + picker : '') +
       '<textarea id="mnd-in" rows="5" placeholder="שם אחד בכל שורה — בדיוק כפי שהועתק מהבורד" ' +
       'style="width:100%;font-family:var(--mono);font-size:13px">' + esc(mndText) + '</textarea>' +
@@ -208,6 +375,18 @@ window.GradeApp = (function () {
     // גוזמים שורות ריקות *בסוף* בלבד — ריקה באמצע היא שורה אמיתית בבורד.
     while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
     if (!lines.length) { out.innerHTML = '<div class="msg warn">הדביקו קודם את עמודת השם מהבורד.</div>'; return; }
+
+    // ⚠ בפועל מדביקים כאן את *כל* השורה מייצוא הבורד, לא רק את השם:
+    //   «נועם זגורי → מייל → טלפון → תאריך → …»
+    // העתקה מ-Excel/מאנדיי תמיד מפרידה עמודות בטאב, והעמודה הראשונה היא שם
+    // הפריט. לכן לוקחים את השדה הראשון בלבד. זה מטפל גם בהדבקה של עמודה אחת.
+    var multi = 0;
+    lines = lines.map(function (l) {
+      var cells = String(l).split('\t');
+      if (cells.length > 1) multi++;
+      return cells[0].trim().replace(/^"(.*)"$/, '$1').trim();
+    });
+    MNDMULTI = multi;
     var ids = mndCohorts();
     if (ids && !ids.length) { out.innerHTML = '<div class="msg warn">בחרו לפחות מחזור אחד לחיפוש.</div>'; return; }
     out.innerHTML = '<div class="msg info">מתאים…</div>';
@@ -260,17 +439,34 @@ window.GradeApp = (function () {
     }).join('');
 
     var problems = MND.unmatched + MND.pending;
-    out.innerHTML =
+    var real = MND.total - MND.blank;
+    // ⚠ אפס התאמות מתוך שורות אמיתיות = כמעט תמיד העמודה הראשונה אינה השם.
+    // בלי ההסבר הזה המשתמש רואה טבלה שכולה «לא נמצא» ואין לו מושג למה.
+    var zeroWarn = (real > 2 && MND.matched === 0)
+      ? '<div class="msg error" style="margin-top:12px"><b>אף שם לא הותאם.</b> ' +
+        'כנראה שהעמודה הראשונה בהדבקה אינה שם המועמדת. ודאו שבייצוא מהבורד ' +
+        'עמודת השם היא הראשונה, או הדביקו רק אותה.</div>'
+      : '';
+    var multiNote = MNDMULTI
+      ? '<p class="hint-text" style="margin:8px 0 0">זוהו כמה עמודות ב-' + MNDMULTI + ' שורות — נלקחה הראשונה (שם הפריט).</p>'
+      : '';
+    out.innerHTML = zeroWarn +
       '<div class="msg ' + (problems ? 'warn' : 'ok') + '" style="margin-top:12px">' +
-      '<b>' + MND.matched + ' מתוך ' + (MND.total - MND.blank) + ' הותאמו</b>' +
+      '<b>' + MND.matched + ' מתוך ' + real + ' הותאמו</b>' +
       (MND.unmatched ? ' · ' + MND.unmatched + ' לא נמצאו' : '') +
       (MND.pending ? ' · ' + MND.pending + ' עדיין בלי ציון (ייצאו ריקים)' : '') +
-      (MND.blank ? ' · ' + MND.blank + ' שורות ריקות' : '') + '</div>' +
+      (MND.blank ? ' · ' + MND.blank + ' שורות ריקות' : '') + '</div>' + multiNote +
       '<div style="overflow-x:auto;max-height:44vh;margin-top:10px"><table class="grid"><thead><tr>' +
       '<th>#</th><th>השם שהודבק</th><th>הותאם ל…</th><th>ציון</th><th>רב-מלל</th><th>כמותי</th><th>אנגלית</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<div class="btn-row" style="margin-top:14px">' +
-      '<button class="btn" id="mnd-copy">העתק ' + MND.rows.length + ' שורות × 4 עמודות</button>' +
+      '<div class="btn-row" style="margin-top:14px;align-items:center">' +
+      '<button class="btn big" id="mnd-file">הורד קובץ ייבוא למאנדיי (' + MND.matched + ' שורות)</button>' +
+      '<label class="mark-toggle"><input type="checkbox" id="mnd-rec"' + (MNDREC ? ' checked' : '') + '> כלול גם עמודת המלצה</label>' +
+      '</div>' +
+      '<p class="hint-text" style="margin:6px 0 0">הקובץ מכיל <b>רק את מי שהותאם ויש לו ציון</b>, ' +
+      'ועמודת השם בו היא בכתיב של הבורד שלך — כך הייבוא מעדכן שורות קיימות ולא יוצר חדשות.</p>' +
+      '<div class="btn-row" style="margin-top:10px">' +
+      '<button class="btn ghost small" id="mnd-copy">העתק כטבלה (לאקסל)</button>' +
       '<button class="btn ghost small" id="mnd-csv">הורד כ-CSV</button></div>' +
       '<div id="mnd-fallback"></div>';
 
@@ -286,6 +482,31 @@ window.GradeApp = (function () {
     });
     var bc = document.getElementById('mnd-copy'); if (bc) bc.onclick = copyMonday;
     var bv = document.getElementById('mnd-csv'); if (bv) bv.onclick = downloadMondayCsv;
+    var bf = document.getElementById('mnd-file'); if (bf) bf.onclick = downloadMondayFile;
+    var br = document.getElementById('mnd-rec');
+    if (br) br.onchange = function () { MNDREC = br.checked; };
+  }
+
+  // הקובץ לייבוא: רק שורות שהותאמו, עם השם בכתיב של הבורד.
+  async function downloadMondayFile() {
+    var rows = MND.rows.filter(function (r) { return r.matched && !r.pending; })
+      .map(function (r) { return { key: r.matched.key, board_name: r.raw }; });
+    if (!rows.length) { toast('אין שורות עם ציון לייצוא.'); return; }
+    try {
+      var res = await fetch('/api/examiner/grading/monday-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-token': token },
+        body: JSON.stringify({ rows: rows, recommendation: MNDREC }),
+      });
+      if (!res.ok) {
+        var e = null; try { e = await res.json(); } catch (x) {}
+        throw new Error((e && e.error) || 'ההורדה נכשלה');
+      }
+      var blob = await res.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = 'monday-scores.xlsx'; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast('הקובץ ירד · ' + rows.length + ' שורות');
+    } catch (e) { alert(e.message); }
   }
 
   // בחירה ידנית מההצעות — שולפים לפי *מפתח*, לא לפי שם. חיפוש חוזר לפי השם

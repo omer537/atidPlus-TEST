@@ -17,6 +17,10 @@ services:
       # התשובה בלבד. חובה להגדיר בלוח הבקרה לפני שמריצים בדיקת AI.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # טוקן monday.com — לשליחת הציונים ישירות לבורד. אופציונלי:
+      # בלעדיו מסך «שלח למאנדיי» פשוט יגיד שאין טוקן.
+      - key: MONDAY_API_TOKEN
+        sync: false
       - key: DB_PATH
         value: /var/data/assessment.db
       # אופציונלי — ברירות המחדל הן claude-opus-5 ו-medium.

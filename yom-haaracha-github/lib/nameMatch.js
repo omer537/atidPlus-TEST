@@ -30,6 +30,30 @@ function firstLast(s) {
   return parts[0] + ' ' + parts[parts.length - 1];
 }
 
+// מילות השם, מנורמלות — בסיס להשוואות «אותן מילים בסדר אחר» ו«חלק מהשם».
+function words(s) { return normLoose(s).split(' ').filter(Boolean); }
+
+// אותה קבוצת מילים בדיוק, בסדר שונה: «חייר עינב» ↔ «עינב חייר».
+// ⚠ דפוס נפוץ ברישום שמות ערביים ורוסיים (משפחה קודם), ולכן חוזר כל יום הערכה.
+function sameWordsDifferentOrder(a, b) {
+  const wa = words(a), wb = words(b);
+  if (wa.length < 2 || wa.length !== wb.length) return false;
+  const sa = wa.slice().sort().join(' ');
+  const sb = wb.slice().sort().join(' ');
+  return sa === sb && wa.join(' ') !== wb.join(' ');
+}
+
+// כל מילות `part` מופיעות ב-`full`, בסדר שמור, ו-`full` ארוך יותר:
+// «מזל מלי» ⊂ «מזל מלי אטיאס» (שם משפחה שחסר בבורד).
+// מחזיר כמה מילים עודפות, או 0 אם אין הכלה.
+function extraWords(part, full) {
+  const wp = words(part), wf = words(full);
+  if (!wp.length || wf.length <= wp.length) return 0;
+  let i = 0;
+  for (const w of wf) { if (i < wp.length && w === wp[i]) i++; }
+  return i === wp.length ? wf.length - wp.length : 0;
+}
+
 // מרחק עריכה (Levenshtein) — עם תקרה כדי לא לבזבז חישוב
 function editDistance(a, b, max) {
   if (a === b) return 0;
@@ -93,6 +117,22 @@ function matchName(rawName, candidates) {
     list.filter((c) => c.fl === rawFl && !out.suggestions.some((s) => s.code === c.code))
       .forEach((c) => out.suggestions.push({ code: c.code, name: c.name, reason: 'שם פרטי ומשפחה זהים (שם אמצעי שונה)', confidence: 'high' }));
   }
+
+  // 3ב) אותן מילים בסדר הפוך — «חייר עינב» מול «עינב חייר». ביטחון גבוה.
+  list.filter((c) => sameWordsDifferentOrder(raw, c.name) && !out.suggestions.some((s) => s.code === c.code))
+    .forEach((c) => out.suggestions.push({ code: c.code, name: c.name, reason: 'סדר השם הפוך (משפחה קודם)', confidence: 'high' }));
+
+  // 3ג) חלק מהשם — «מזל מלי» מול «מזל מלי אטיאס». ככל שחסרות יותר מילים, פחות ביטחון.
+  list.forEach((c) => {
+    if (out.suggestions.some((s) => s.code === c.code)) return;
+    const extra = extraWords(raw, c.name);
+    if (!extra) return;
+    out.suggestions.push({
+      code: c.code, name: c.name,
+      reason: extra === 1 ? 'חלק מהשם (חסרה מילה אחת)' : 'חלק מהשם (חסרות ' + extra + ' מילים)',
+      confidence: extra === 1 ? 'high' : 'medium',
+    });
+  });
 
   // 4) מרחק עריכה קטן — ביטחון בינוני/נמוך
   if (rawLoose.length >= 4) {

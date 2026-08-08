@@ -16,6 +16,7 @@ const schedule = require('./lib/schedule');
 const score = require('./lib/score');
 const aiGrade = require('./lib/aiGrade');
 const nameMatch = require('./lib/nameMatch');
+const monday = require('./lib/monday');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -3226,10 +3227,13 @@ app.post('/api/examiner/grading/monday-match', authExaminer, (req, res) => {
   const byKey = {};
   pool.forEach((r) => { byKey[r.cohort_id + ':' + r.code] = r; });
 
+  // ⚠ מספרים בלבד. עמודת Number במאנדיי דוחה את המחרוזת «טרם נבדק».
+  // ההמלצה היא שורה אחת, אבל מנקים טאב/שורה חדשה בכל מקרה — הן היו שוברות
+  // גם את ה-TSV וגם את קובץ הייבוא.
+  const oneLine = (s) => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').trim();
   const vals = (r) => (r && !r.pending
-    ? { final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english }
-    // ⚠ מספרים בלבד. עמודת Number במאנדיי דוחה את המחרוזת «טרם נבדק».
-    : { final: null, ravMelel: null, quant: null, english: null });
+    ? { final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english, recommendation: oneLine(r.recommendation) }
+    : { final: null, ravMelel: null, quant: null, english: null, recommendation: '' });
   const brief = (key) => {
     const r = byKey[key];
     return r ? { key: key, code: r.code, cohort_id: r.cohort_id, name: r.name, day: r.day || '' } : null;
@@ -3273,6 +3277,189 @@ app.post('/api/examiner/grading/monday-match', authExaminer, (req, res) => {
     pending: rows.filter((r) => r.pending).length,
     pool: pool.length,
   });
+});
+
+// קובץ ייבוא למאנדיי.
+// ⚠ למה קובץ ולא הדבקה: אי אפשר להעתיק/להדביק תאים בגריד של מאנדיי.
+// הטריק שמונע שורות כפולות — עמודת השם בקובץ היא **הכתיב של הבורד** (מה
+// שהמשתמש הדביק), ולא השם שהמועמדת הקלידה בבוקר. כך «Overwrite existing
+// items» לפי עמודת השם מוצא כל שורה בדיוק, ואף פריט חדש לא נוצר.
+// ובנוסף: נכללות רק שורות שהותאמו — שם שלא נמצא פשוט לא בקובץ.
+app.post('/api/examiner/grading/monday-file', authExaminer, (req, res) => {
+  const b = req.body || {};
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return res.status(400).json({ error: 'אין שורות מותאמות לייצוא.' });
+  const withRec = !!b.recommendation;
+
+  const ids = Array.from(new Set(db.prepare('SELECT id FROM grading_cohorts').all().map((c) => c.id)));
+  const byKey = {};
+  for (const id of ids) buildSheetRows(id).forEach((r) => { byKey[id + ':' + r.code] = r; });
+
+  const oneLine = (s) => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ').trim();
+  const header = ['שם', 'ציון', 'רב-מלל', 'כמותי', 'אנגלית'].concat(withRec ? ['המלצה'] : []);
+  const out = [];
+  for (const row of rows) {
+    const r = byKey[row.key];
+    if (!r || r.pending) continue;          // בלי ציון — אין מה לכתוב לבורד
+    const name = String(row.board_name || r.name || '').trim();
+    if (!name) continue;
+    const o = {
+      'שם': name,                            // ⚠ הכתיב של הבורד, לא שלנו
+      'ציון': r.final != null ? r.final : '',
+      'רב-מלל': r.ravMelel != null ? r.ravMelel : '',
+      'כמותי': r.quant != null ? r.quant : '',
+      'אנגלית': r.english != null ? r.english : '',
+    };
+    if (withRec) o['המלצה'] = oneLine(r.recommendation);
+    out.push(o);
+  }
+  if (!out.length) return res.status(400).json({ error: 'אין שורות עם ציון לייצוא.' });
+
+  const ws = XLSX.utils.json_to_sheet(out, { header: header });
+  ws['!views'] = [{ RTL: true }];
+  ws['!cols'] = [{ wch: 24 }, { wch: 8 }, { wch: 9 }, { wch: 8 }, { wch: 9 }].concat(withRec ? [{ wch: 60 }] : []);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'ציונים');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  setDownloadName(res, 'monday-scores.xlsx');
+  res.send(buf);
+});
+
+// ============================================================
+//  שליחה ישירה למאנדיי (API)
+// ============================================================
+// ⚠ `change_multiple_column_values` כותב רק את העמודות שנקבו בשמן. זו הסיבה
+// שעברנו לכאן מייבוא Excel — «Overwrite existing items» כותב את הפריט כולו.
+// ⚠ הטוקן לא מוחזר בשום תשובה. `has_token` בלבד.
+
+// כל השורות המנוקדות מכל המחזורים, לפי מפתח — בסיס להתאמה ולכתיבה.
+function mondayPool(cohortIds) {
+  let ids = Array.isArray(cohortIds) && cohortIds.length
+    ? Array.from(new Set(cohortIds.map(Number).filter(Boolean)))
+    : db.prepare('SELECT id FROM grading_cohorts ORDER BY id').all().map((c) => c.id);
+  const pool = [];
+  for (const id of ids) buildSheetRows(id).forEach((r) => pool.push(Object.assign({ cohort_id: id, key: id + ':' + r.code }, r)));
+  return pool;
+}
+const MONDAY_FIELDS = [
+  { field: 'final', label: 'ציון' },
+  { field: 'ravMelel', label: 'רב-מלל' },
+  { field: 'quant', label: 'כמותי' },
+  { field: 'english', label: 'אנגלית' },
+  { field: 'recommendation', label: 'המלצה' },
+];
+
+app.get('/api/examiner/monday/test', authExaminer, async (req, res) => {
+  if (!monday.hasToken()) {
+    return res.json({ ok: false, has_token: false, message: 'לא הוגדר טוקן של מאנדיי. הוסיפו MONDAY_API_TOKEN בהגדרות השרת.' });
+  }
+  try {
+    const me = await monday.testToken();
+    res.json({ ok: true, has_token: true, me: me ? { name: me.name, email: me.email } : null,
+      message: me ? ('מחובר כ־' + me.name + '.') : 'הטוקן תקין.' });
+  } catch (e) { res.json({ ok: false, has_token: true, message: e.message }); }
+});
+
+app.get('/api/examiner/monday/boards', authExaminer, async (req, res) => {
+  try { res.json({ ok: true, boards: await monday.listBoards() }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/examiner/monday/board/:id', authExaminer, async (req, res) => {
+  try {
+    const info = await monday.boardColumns(req.params.id);
+    // רק סוגים שאנחנו יודעים לכתוב אליהם בבטחה
+    const writable = info.columns.filter((c) => ['numbers', 'text', 'long_text'].indexOf(c.type) >= 0);
+    res.json({ ok: true, board: { id: info.id, name: info.name }, columns: writable, fields: MONDAY_FIELDS });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// תצוגה מקדימה — **קריאה בלבד**. שולף את שמות הפריטים מהבורד, מתאים אותם
+// מול הציונים, ומחזיר בדיוק מה ייכתב. שום דבר לא נכתב כאן.
+app.post('/api/examiner/monday/preview', authExaminer, async (req, res) => {
+  const b = req.body || {};
+  if (!b.board_id) return res.status(400).json({ error: 'לא נבחר בורד.' });
+  try {
+    const items = await monday.boardItems(b.board_id);
+    const pool = mondayPool(b.cohorts);
+    const candidates = pool.map((r) => ({ code: r.key, name: r.name }));
+    const byKey = {}; pool.forEach((r) => { byKey[r.key] = r; });
+    const manual = b.manual || {};    // { item_id: key } — הכרעות ידניות של המשתמש
+
+    const rows = items.map((it) => {
+      const forced = manual[it.id];
+      const m = forced ? { exact: { code: forced } } : nameMatch.matchName(it.name, candidates);
+      const r = m.exact ? byKey[m.exact.code] : null;
+      const out = {
+        item_id: it.id, board_name: it.name,
+        matched: r ? { key: r.key, name: r.name, day: r.day || '' } : null,
+        suggestions: m.exact ? [] : (m.suggestions || []).map((s) => ({
+          key: s.code, name: (byKey[s.code] || {}).name, day: (byKey[s.code] || {}).day || '',
+          reason: s.reason, confidence: s.confidence,
+        })),
+        pending: !!(r && r.pending), values: {},
+      };
+      if (r && !r.pending) {
+        out.values = { final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english,
+          recommendation: String(r.recommendation || '').replace(/[\t\r\n]+/g, ' ').trim() };
+      }
+      return out;
+    });
+    const willWrite = rows.filter((r) => r.matched && !r.pending).length;
+    res.json({ ok: true, fields: MONDAY_FIELDS, rows: rows,
+      total: rows.length, will_write: willWrite,
+      unmatched: rows.filter((r) => !r.matched).length,
+      pending: rows.filter((r) => r.pending).length });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// הכתיבה בפועל. רק שורות שהמשתמש ראה בתצוגה המקדימה, ורק העמודות שמופו.
+app.post('/api/examiner/monday/push', authExaminer, async (req, res) => {
+  const b = req.body || {};
+  const boardId = b.board_id;
+  const mapping = b.mapping || {};     // { field: column_id }
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!boardId) return res.status(400).json({ error: 'לא נבחר בורד.' });
+  if (!rows.length) return res.status(400).json({ error: 'אין שורות לשליחה.' });
+  const mapped = Object.keys(mapping).filter((f) => mapping[f]);
+  if (!mapped.length) return res.status(400).json({ error: 'לא מופתה אף עמודה.' });
+
+  let colTypes = {};
+  try {
+    const info = await monday.boardColumns(boardId);
+    info.columns.forEach((c) => { colTypes[c.id] = c.type; });
+  } catch (e) { return res.status(400).json({ error: e.message }); }
+
+  const pool = mondayPool(b.cohorts);
+  const byKey = {}; pool.forEach((r) => { byKey[r.key] = r; });
+
+  const results = { written: 0, skipped: 0, failed: [] };
+  for (const row of rows) {
+    const r = byKey[row.key];
+    if (!r || r.pending) { results.skipped++; continue; }
+    const vals = {};
+    for (const f of mapped) {
+      const colId = mapping[f];
+      const raw = (f === 'recommendation')
+        ? String(r.recommendation || '').replace(/[\t\r\n]+/g, ' ').trim()
+        : r[f];
+      // ⚠ ערך ריק לא נשלח בכלל — שליחה של "" הייתה *מוחקת* תא קיים בבורד.
+      if (raw == null || raw === '') continue;
+      vals[colId] = monday.columnValue(colTypes[colId] || 'text', raw);
+    }
+    if (!Object.keys(vals).length) { results.skipped++; continue; }
+    try {
+      await monday.setValues(boardId, row.item_id, vals);
+      results.written++;
+    } catch (e) {
+      results.failed.push({ item_id: row.item_id, name: row.board_name || r.name, error: e.message });
+      // כשל אימות/הרשאה יחזור על עצמו בכל שורה — עוצרים במקום להציף
+      if (/טוקן|הרשאה/.test(e.message)) break;
+    }
+  }
+  logEvent(null, 'monday_push', 'board ' + boardId + ' · נכתבו ' + results.written + ' · נכשלו ' + results.failed.length);
+  res.json(Object.assign({ ok: true }, results));
 });
 
 app.get('/api/examiner/grading/export-sheet/:id', authExaminer, (req, res) => {

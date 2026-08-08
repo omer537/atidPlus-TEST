@@ -181,8 +181,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   check(JSON.stringify(mm.body.columns) === JSON.stringify(['ציון', 'רב-מלל', 'כמותי', 'אנגלית']),
     'ארבע העמודות שהוסכמו, בסדר הנכון');
   // אף ערך אינו מחרוזת «טרם נבדק» — עמודת Number במאנדיי דוחה טקסט
-  const anyText = mm.body.rows.some((r) => Object.keys(r.values).some((k) => typeof r.values[k] === 'string'));
-  check(!anyText, '⭐ אין אף ערך טקסטואלי בארבע העמודות');
+  // ⚠ רק ארבע עמודות הציון חייבות להיות מספריות. `recommendation` הוא טקסט
+  // בכוונה, והוא נכנס לעמודה נפרדת מסוג Text במאנדיי.
+  const NUM4 = ['final', 'ravMelel', 'quant', 'english'];
+  const anyText = mm.body.rows.some((r) => NUM4.some((k) => typeof r.values[k] === 'string'));
+  check(!anyText, '⭐ אין אף ערך טקסטואלי בארבע עמודות הציון');
 
   head('7. התאמה מקורבת — מציעה, לא מכריעה');
   const fuzzy = await j('/examiner/grading/monday-match', 'POST', { names: ['נעמה בן-דוד כהן לוי', 'ליאור אזולאיi'], cohorts: [CID] }, tok);
@@ -238,6 +241,66 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   }
   const left = (await j('/examiner/grading/cohorts', null, null, tok)).body.cohorts;
   check(left.some((c) => c.id === CID), 'המחזור הראשי שרד את הניקוי');
+
+
+  head('10. ⭐ הדבקת ייצוא בורד שלם — לא רק השם');
+  // ⚠ זה מה שקרה בפועל: המשתמש ייצא את הבורד ל-Excel והדביק שורות שלמות.
+  // השרת מקבל שם נקי כי הלקוח חותך על טאב — כאן בודקים את הצד של השרת
+  // עם שם נקי, ואת החיתוך עצמו בבדיקת הדפדפן.
+  const wide = await j('/examiner/grading/monday-match', 'POST',
+    { names: ['נעמה בן-דוד'], cohorts: [CID] }, tok);
+  check(!!wide.body.rows[0].matched, 'שם נקי מותאם');
+  check(wide.body.rows[0].values.recommendation !== undefined, 'values כולל recommendation');
+  const recTxt = wide.body.rows[0].values.recommendation || '';
+  check(!/[\t\r\n]/.test(recTxt), '⭐ ההמלצה בשורה אחת בלי טאבים: "' + recTxt.slice(0, 40) + '…"');
+
+  head('11. ⭐ קובץ ייבוא למאנדיי');
+  const okRows = wide.body.rows.filter((r) => r.matched && !r.pending)
+    .map((r) => ({ key: r.matched.key, board_name: 'נעמה בן דוד' }));  // הכתיב של הבורד
+  check(okRows.length > 0, 'יש שורה מותאמת לייצוא');
+  const fr = await fetch(A + '/examiner/grading/monday-file', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-token': tok },
+    body: JSON.stringify({ rows: okRows, recommendation: true }),
+  });
+  check(fr.status === 200, 'הקובץ נוצר (' + fr.status + ')');
+  const buf = Buffer.from(await fr.arrayBuffer());
+  check(buf.length > 2000, 'הקובץ לא ריק (' + buf.length + ' בתים)');
+  const XLSX = require('xlsx');
+  const wbk = XLSX.read(buf, { type: 'buffer' });
+  const sheet = XLSX.utils.sheet_to_json(wbk.Sheets[wbk.SheetNames[0]], { defval: '' });
+  check(sheet.length === okRows.length, 'שורה לכל התאמה (' + sheet.length + ')');
+  check(sheet[0]['שם'] === 'נעמה בן דוד',
+    '⭐ עמודת השם היא הכתיב של הבורד ולא שלנו: "' + sheet[0]['שם'] + '"');
+  check(Object.keys(sheet[0]).join(',') === 'שם,ציון,רב-מלל,כמותי,אנגלית,המלצה',
+    'העמודות בסדר הנכון: ' + Object.keys(sheet[0]).join(' · '));
+  check(typeof sheet[0]['ציון'] === 'number', 'הציון הוא מספר ולא טקסט');
+  // בלי המלצה — 5 עמודות
+  const fr2 = await fetch(A + '/examiner/grading/monday-file', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-token': tok },
+    body: JSON.stringify({ rows: okRows }),
+  });
+  const sheet2 = XLSX.utils.sheet_to_json(XLSX.read(Buffer.from(await fr2.arrayBuffer()), { type: 'buffer' }).Sheets['ציונים'], { defval: '' });
+  check(!('המלצה' in sheet2[0]), 'בלי הצ׳קבוקס — אין עמודת המלצה');
+  // שורה בלי ציון לא נכנסת לקובץ
+  const noRows = await fetch(A + '/examiner/grading/monday-file', {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-token': tok },
+    body: JSON.stringify({ rows: [{ key: 'אין:כזה', board_name: 'רפאים' }] }),
+  });
+  check(noRows.status === 400, '⭐ מפתח לא קיים לא מייצר שורה בקובץ (' + noRows.status + ')');
+
+  head('12. ⭐ התאמות שמות מהעולם האמיתי');
+  const nm = require('../../lib/nameMatch');
+  const pool = [{ code: 'a', name: 'חייר עינב' }, { code: 'b', name: 'מזל מלי אטיאס' }, { code: 'c', name: 'יהב ארבל בריטש' }];
+  const revM = nm.matchName('עינב חייר', pool);
+  check(!revM.exact && revM.suggestions.some((s) => s.code === 'a' && /הפוך/.test(s.reason)),
+    '⭐ סדר הפוך → הצעה (לא שיוך אוטומטי)');
+  const sub = nm.matchName('מזל מלי', pool);
+  check(!sub.exact && sub.suggestions.some((s) => s.code === 'b' && /חלק מהשם/.test(s.reason)),
+    '⭐ חלק מהשם → הצעה');
+  const mid = nm.matchName('יהב בריטש', pool);
+  check(mid.suggestions.some((s) => s.code === 'c'), 'שם אמצעי → הצעה (כמו קודם)');
+  const same = nm.matchName('חייר עינב', pool);
+  check(same.exact && same.exact.code === 'a', '⭐ שם מדויק נשאר שיוך אוטומטי — לא נשבר');
 
   console.log(fail.length ? `\n❌ ${fail.length} כשלים:\n  - ` + fail.join('\n  - ') : '\n✅ כל הבדיקות עברו');
   process.exit(fail.length ? 1 : 0);
