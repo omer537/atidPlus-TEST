@@ -367,6 +367,9 @@ tr.left-row td { opacity: 0.5; }
 .list-col .chip-name { margin: 3px; }
 .mark-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
 .mark-toggle input { width: 18px; height: 18px; accent-color: var(--green); cursor: pointer; }
+/* יום שאין בו אף נבחן שנבדק — מוצג ומוסבר, לא מוסתר. */
+.mark-toggle.is-off { opacity: .45; cursor: not-allowed; }
+.mark-toggle.is-off input { cursor: not-allowed; }
 @media (max-width: 620px) { .two-lists { grid-template-columns: 1fr; } }
 
 /* תכנון ריאיונות */

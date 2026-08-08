@@ -32,6 +32,7 @@ const BOARD_ITEMS = [
   { id: '102', name: 'שרעבי איתי' },        // סדר הפוך → הצעה
   { id: '103', name: 'מישהי אחרת לגמרי' },  // אין התאמה
 ];
+// ⚠ «ליאור אזולאי» נבדקת אצלנו אבל **אין לה שורה בבורד** — הכיוון ההפוך.
 const WRITES = [];              // כל mutation שנשלחה — זה מה שאנחנו בודקים
 let AUTH_SEEN = null;
 
@@ -89,7 +90,7 @@ function fakeMonday() {
     const tok = (await j('/examiner/login', 'POST', { password: PW })).body.token;
 
     head('0. מחזור עם ציונים');
-    const NAMES = ['נעמה בן-דוד', 'איתי שרעבי'];
+    const NAMES = ['נעמה בן-דוד', 'איתי שרעבי', 'ליאור אזולאי'];
     await j('/examiner/create-day', 'POST', { name: 'בדיקת מאנדיי', total_rounds: 3 }, tok);
     await j('/examiner/add-examinees-bulk', 'POST', { text: NAMES.map((n, i) => n + ', ' + (701 + i)).join('\n') }, tok);
     await j('/examiner/add-interviewers-bulk', 'POST', { text: 'א א, חדר 1\nב ב, חדר 2' }, tok);
@@ -135,7 +136,12 @@ function fakeMonday() {
 
     head('3. תצוגה מקדימה — קריאה בלבד');
     const before = WRITES.length;
-    const pv = await j('/examiner/monday/preview', 'POST', { board_id: '900' }, tok);
+    const dl = await j('/examiner/monday/days', null, null, tok);
+    check(dl.body.days.length >= 1, 'רשימת הימים נטענה (' + dl.body.days.map((d) => d.day + ':' + d.graded + '/' + d.total).join(' · ') + ')');
+    const DAYS = dl.body.days.map((d) => d.day_key);
+    const noDays = await j('/examiner/monday/preview', 'POST', { board_id: '900' }, tok);
+    check(noDays.code === 400, '⭐ תצוגה מקדימה בלי בחירת ימים נחסמת (' + noDays.code + ')');
+    const pv = await j('/examiner/monday/preview', 'POST', { board_id: '900', days: DAYS }, tok);
     check(WRITES.length === before, '⭐ התצוגה המקדימה לא כתבה כלום');
     check(pv.body.total === 3, 'שלוש שורות בבורד');
     const r101 = pv.body.rows.find((r) => r.item_id === '101');
@@ -148,14 +154,33 @@ function fakeMonday() {
 
     head('4. הכרעה ידנית מוסיפה שורה');
     const key102 = r102.suggestions[0].key;
-    const pv2 = await j('/examiner/monday/preview', 'POST', { board_id: '900', manual: { '102': key102 } }, tok);
-    check(pv2.body.will_write === 2, '⭐ אחרי הבחירה הידנית ייכתבו 2 שורות');
+    // ★ השיבוץ עכשיו מקומי בלקוח — השרת מחזיר `pool` וזה כל מה שצריך.
+    check(Array.isArray(pv.body.pool) && pv.body.pool.length >= 2,
+      '⭐ preview מחזיר pool מלא (' + pv.body.pool.length + ') — התנאי לשיבוץ בלי רשת');
+    const inPool = pv.body.pool.find((p) => p.key === key102);
+    check(!!inPool && !!inPool.values && inPool.values.final != null,
+      '⭐ ה-pool כולל את הערכים לכתיבה — הלקוח לא צריך לקרוא לשרת שוב');
+    const orphan = pv.body.pool.find((p) => /ליאור/.test(p.name));
+    check(!!orphan, '⭐ נבחנת שאין לה שורה בבורד מופיעה ב-pool (כדי שתוצג כחסרה)');
+    check(!pv.body.rows.some((r) => r.matched && r.matched.key === orphan.key),
+      '⭐ ואכן אף שורה בבורד לא הותאמה אליה');
+
+    head('4ב. ⭐ סינון ימים');
+    if (DAYS.length > 1) {
+      const one = await j('/examiner/monday/preview', 'POST', { board_id: '900', days: [DAYS[0]] }, tok);
+      check(one.body.pool.length < pv.body.pool.length, 'יום אחד מחזיר פחות נבחנים מכל הימים');
+    } else {
+      const bogus = await j('/examiner/monday/preview', 'POST', { board_id: '900', days: ['999|לא קיים'] }, tok);
+      check(bogus.code === 400, '⭐ יום שלא קיים → 400 ולא «כל הנבחנים»');
+    }
 
     head('5. ⭐ הכתיבה — רק העמודות שמופו');
     WRITES.length = 0;
-    const rows = pv2.body.rows.filter((r) => r.matched && !r.pending).map((r) => ({ item_id: r.item_id, key: r.matched.key, board_name: r.board_name }));
+    const rows = pv.body.rows.filter((r) => r.matched && !r.pending).map((r) => ({ item_id: r.item_id, key: r.matched.key, board_name: r.board_name }));
+    // מוסיפים ידנית את השורה ששובצה בלקוח, בדיוק כמו שהמסך עושה
+    rows.push({ item_id: '102', key: key102, board_name: 'שרעבי איתי' });
     const push = await j('/examiner/monday/push', 'POST', {
-      board_id: '900', rows: rows,
+      board_id: '900', rows: rows, days: DAYS,
       mapping: { final: 'num_score', ravMelel: 'num_rav', recommendation: 'txt_rec' },   // בכוונה בלי כמותי/אנגלית
     }, tok);
     check(push.body.written === 2, 'נכתבו ' + push.body.written + ' שורות');
@@ -171,15 +196,17 @@ function fakeMonday() {
     check(!('phone_x' in w.vals), 'שום עמודה אחרת בבורד לא נגעה');
 
     head('6. הגנות');
-    const noMap = await j('/examiner/monday/push', 'POST', { board_id: '900', rows: rows, mapping: {} }, tok);
+    const noPushDays = await j('/examiner/monday/push', 'POST', { board_id: '900', rows: rows, mapping: { final: 'num_score' } }, tok);
+    check(noPushDays.code === 400, '⭐ שליחה בלי בחירת ימים נחסמת');
+    const noMap = await j('/examiner/monday/push', 'POST', { board_id: '900', rows: rows, days: DAYS, mapping: {} }, tok);
     check(noMap.code === 400, 'בלי מיפוי — נחסם');
-    const noRows = await j('/examiner/monday/push', 'POST', { board_id: '900', rows: [], mapping: { final: 'num_score' } }, tok);
+    const noRows = await j('/examiner/monday/push', 'POST', { board_id: '900', rows: [], days: DAYS, mapping: { final: 'num_score' } }, tok);
     check(noRows.code === 400, 'בלי שורות — נחסם');
     const noBoard = await j('/examiner/monday/preview', 'POST', {}, tok);
     check(noBoard.code === 400, 'בלי בורד — נחסם');
     // ערך ריק לעולם לא נשלח (היה מוחק תא קיים)
     WRITES.length = 0;
-    await j('/examiner/monday/push', 'POST', { board_id: '900', rows: rows, mapping: { quant: 'num_q' } }, tok);
+    await j('/examiner/monday/push', 'POST', { board_id: '900', rows: rows, days: DAYS, mapping: { quant: 'num_q' } }, tok);
     const emptySent = WRITES.some((x) => Object.values(x.vals).some((v) => v === '' || v == null));
     check(!emptySent, '⭐ ערך ריק לא נשלח — תא קיים בבורד לא נמחק');
 

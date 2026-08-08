@@ -161,7 +161,9 @@ window.GradeApp = (function () {
   // ================================================= שליחה ישירה למאנדיי
   // ★ המסלול המומלץ. כותב תאים בודדים דרך ה-API ולכן לא נוגע בשום עמודה אחרת
   // ולא יוצר שורות — בניגוד לייבוא Excel שכותב את הפריט כולו.
-  var MB = { board: null, columns: [], fields: [], rows: [], mapping: {}, manual: {} };
+  // `pool` = כל הנבחנים בימים שנבחרו, עם הערכים שלהם. הוא מה שמאפשר לשבץ
+  // ידנית **בלי שום קריאת רשת**. `days_sel` = הימים המסומנים.
+  var MB = { board: null, columns: [], fields: [], rows: [], pool: [], mapping: {}, days: [], days_sel: {} };
 
   function mondayApiCardHtml() {
     return '<div class="card" id="mapi-card">' +
@@ -209,7 +211,10 @@ window.GradeApp = (function () {
     box.innerHTML = '<div class="msg info">קורא את עמודות הבורד…</div>';
     try {
       var r = await call('/examiner/monday/board/' + encodeURIComponent(id));
-      MB.board = r.board; MB.columns = r.columns || []; MB.fields = r.fields || []; MB.mapping = {}; MB.manual = {};
+      var d = await call('/examiner/monday/days');
+      MB.board = r.board; MB.columns = r.columns || []; MB.fields = r.fields || [];
+      MB.mapping = {}; MB.rows = []; MB.pool = [];
+      MB.days = d.days || []; MB.days_sel = {};   // ⚠ בכוונה ריק — המשתמש חייב לבחור
       if (!MB.columns.length) {
         box.innerHTML = '<div class="msg warn">לא נמצאו בבורד עמודות מסוג מספר או טקסט. צרו קודם את עמודות הציון.</div>';
         return;
@@ -233,77 +238,155 @@ window.GradeApp = (function () {
       return '<label class="field" style="margin:0"><span>' + esc(f.label) + '</span>' +
         '<select class="mapi-col" data-f="' + esc(f.field) + '">' + opts + '</select></label>';
     }).join('');
-    box.innerHTML = '<p class="hint-text" style="margin-top:14px">לאיזו עמודה בבורד לכתוב כל ערך? מה שמסומן «לא לשלוח» — לא ייכתב.</p>' +
+    // ⚠ בחירת הימים חובה. בלעדיה כל שליחה הייתה חושפת גם נבחנים שטרם נבדקו.
+    var days = MB.days.map(function (d) {
+      var none = d.graded === 0;
+      return '<label class="mark-toggle' + (none ? ' is-off' : '') + '" style="display:block;margin:2px 0">' +
+        '<input type="checkbox" class="mapi-day" value="' + esc(d.day_key) + '"' +
+        (MB.days_sel[d.day_key] ? ' checked' : '') + (none ? ' disabled' : '') + '> ' +
+        '<b>' + esc(d.day) + '</b> · נבדקו ' + d.graded + ' מתוך ' + d.total +
+        (none ? ' — אף אחד לא נבדק' : '') + '</label>';
+    }).join('');
+    box.innerHTML =
+      '<h3 style="margin:16px 0 4px;font-size:14px">אילו ימים לשלוח?</h3>' +
+      '<p class="hint-text" style="margin:0 0 8px">רק הימים שתסמנו ייכללו. מי שטרם נבדק לא יישלח בכל מקרה.</p>' +
+      '<div style="max-height:22vh;overflow:auto">' + (days || '<span class="hint-text">אין ימים.</span>') + '</div>' +
+      '<h3 style="margin:18px 0 4px;font-size:14px">לאיזו עמודה לכתוב כל ערך?</h3>' +
+      '<p class="hint-text" style="margin:0 0 8px">מה שמסומן «לא לשלוח» — לא ייכתב, והעמודה בבורד לא תשתנה.</p>' +
       '<div class="day-grid">' + rows + '</div>' +
       '<div class="btn-row" style="margin-top:12px"><button class="btn" id="mapi-prev">תצוגה מקדימה</button></div>' +
       '<div id="mapi-prevbox"></div>';
     box.querySelectorAll('.mapi-col').forEach(function (s) {
       s.onchange = function () { MB.mapping[s.getAttribute('data-f')] = s.value; };
     });
+    box.querySelectorAll('.mapi-day').forEach(function (c) {
+      c.onchange = function () {
+        if (c.checked) MB.days_sel[c.value] = true; else delete MB.days_sel[c.value];
+      };
+    });
     var p = document.getElementById('mapi-prev'); if (p) p.onclick = mapiPreview;
   }
 
   async function mapiPreview() {
     var box = document.getElementById('mapi-prevbox'); if (!box) return;
+    var sel = Object.keys(MB.days_sel);
+    if (!sel.length) { box.innerHTML = '<div class="msg warn">בחרו לפחות יום אחד לשליחה.</div>'; return; }
     box.innerHTML = '<div class="msg info">קורא את הבורד ומתאים שמות…</div>';
     try {
-      var r = await call('/examiner/monday/preview', 'POST', { board_id: MB.board.id, manual: MB.manual });
+      var r = await call('/examiner/monday/preview', 'POST', { board_id: MB.board.id, days: sel });
       MB.rows = r.rows || [];
-      renderMapiPreview(r);
+      MB.pool = r.pool || [];
+      renderMapiPreview();
     } catch (e) { box.innerHTML = '<div class="msg error">' + esc(e.message) + '</div>'; }
   }
 
-  function renderMapiPreview(r) {
+  // ★ כל השיבוצים נפתרים **בזיכרון** מתוך MB.pool. אין שום קריאת רשת בין
+  // «תצוגה מקדימה» ל«שלח» — זו הייתה הסיבה להמתנה בכל שיבוץ.
+  function mapiPoolBy(key) {
+    for (var i = 0; i < MB.pool.length; i++) if (MB.pool[i].key === key) return MB.pool[i];
+    return null;
+  }
+  function mapiAssign(itemId, key) {
+    var row = null;
+    for (var i = 0; i < MB.rows.length; i++) if (MB.rows[i].item_id === itemId) row = MB.rows[i];
+    if (!row) return;
+    if (!key) { row.matched = null; row.pending = false; row.values = {}; renderMapiPreview(); return; }
+    // ⚠ אותה נבחנת לא יכולה להיות משובצת לשתי שורות בבורד — זה היה כותב לה
+    // את הציון פעמיים ומשאיר שורה אחרת בלי כלום.
+    var taken = MB.rows.find(function (x) { return x !== row && x.matched && x.matched.key === key; });
+    if (taken) { alert('«' + mapiPoolBy(key).name + '» כבר משובצת לשורה «' + taken.board_name + '».\n\nבטלו אותה שם קודם.'); renderMapiPreview(); return; }
+    var p = mapiPoolBy(key); if (!p) return;
+    row.matched = { key: p.key, name: p.name, day: p.day };
+    row.pending = !!p.pending;
+    row.values = p.pending ? {} : p.values;
+    renderMapiPreview();
+  }
+
+  function renderMapiPreview() {
     var box = document.getElementById('mapi-prevbox'); if (!box) return;
     var mapped = MB.fields.filter(function (f) { return MB.mapping[f.field]; });
+    var todo = MB.rows.filter(function (r) { return !r.matched; });
+    var ready = MB.rows.filter(function (r) { return r.matched && !r.pending; });
+    var pend = MB.rows.filter(function (r) { return r.matched && r.pending; });
+    var used = {}; MB.rows.forEach(function (r) { if (r.matched) used[r.matched.key] = 1; });
+    // הכיוון ההפוך: נבדקו אצלנו ואין להם שורה בבורד — לא יישלחו לאף אחד.
+    var orphans = MB.pool.filter(function (p) { return !used[p.key] && !p.pending; });
+
+    // — א. דורש טיפול, בראש, אחד מתחת לשני —
+    var allOpts = MB.pool.filter(function (p) { return !used[p.key]; })
+      .map(function (p) { return '<option value="' + esc(p.key) + '">' + esc(p.name) + (p.day ? ' · ' + esc(p.day) : '') + (p.pending ? ' (בלי ציון)' : '') + '</option>'; }).join('');
+    var todoHtml = !todo.length
+      ? '<div class="msg ok">כל שורות הבורד טופלו ✓</div>'
+      : '<div class="msg warn" style="margin-bottom:8px"><b>נותרו ' + todo.length + ' לטיפול</b> — שורות בבורד שלא זוהו. שבצו או השאירו «דלג».</div>' +
+        todo.map(function (r) {
+          var sug = r.suggestions.map(function (s) {
+            return '<option value="' + esc(s.key) + '">' + esc(s.name) + (s.day ? ' · ' + esc(s.day) : '') + ' — ' + esc(s.reason) + '</option>';
+          }).join('');
+          return '<div class="mapi-todo" style="display:flex;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;flex-wrap:wrap">' +
+            '<b style="min-width:150px">' + esc(r.board_name) + '</b>' +
+            '<select class="mapi-pick" data-i="' + esc(r.item_id) + '" style="flex:1;min-width:230px">' +
+            '<option value="">— דלג, לא לשלוח —</option>' +
+            (sug ? '<optgroup label="הצעות">' + sug + '</optgroup>' : '') +
+            '<optgroup label="כל הנבחנים">' + allOpts + '</optgroup></select>' +
+            (r.suggestions.length ? '' : '<span class="hint-text" style="font-size:11px">אין הצעה — בחרו ידנית</span>') +
+            '</div>';
+        }).join('');
+
+    // — ב. יישלחו (מכווץ) —
     var head = '<th>שורה בבורד</th><th>הותאם ל…</th>' + mapped.map(function (f) { return '<th>' + esc(f.label) + '</th>'; }).join('');
-    var body = MB.rows.map(function (row) {
-      var right;
-      if (row.matched) right = '<b style="color:var(--ok)">' + esc(row.matched.name) + '</b>' +
-        (row.pending ? ' <span style="color:var(--warn);font-size:11px">בלי ציון — ידולג</span>' : '');
-      else if (row.suggestions.length) right = '<select class="mapi-pick" data-i="' + esc(row.item_id) + '">' +
-        '<option value="">— דלג —</option>' + row.suggestions.map(function (s) {
-          return '<option value="' + esc(s.key) + '">' + esc(s.name) + ' — ' + esc(s.reason) + '</option>';
-        }).join('') + '</select>';
-      else right = '<span style="color:var(--faint)">אין התאמה — ידולג</span>';
+    var body = ready.map(function (row) {
       var cells = mapped.map(function (f) {
         var v = row.values[f.field];
         return '<td>' + (v == null || v === '' ? '<span style="color:var(--faint)">—</span>' : esc(String(v)).slice(0, 60)) + '</td>';
       }).join('');
-      return '<tr' + (row.matched && !row.pending ? '' : ' style="opacity:.5"') + '>' +
-        '<td>' + esc(row.board_name) + '</td><td>' + right + '</td>' + cells + '</tr>';
+      return '<tr><td>' + esc(row.board_name) + '</td><td><b style="color:var(--ok)">' + esc(row.matched.name) + '</b>' +
+        '<button class="btn ghost small mapi-undo" data-i="' + esc(row.item_id) + '" style="margin-right:6px;padding:1px 6px;font-size:11px">בטל</button></td>' + cells + '</tr>';
     }).join('');
 
     box.innerHTML =
-      '<div class="msg ' + (r.will_write ? 'ok' : 'warn') + '" style="margin-top:12px">' +
-      '<b>ייכתבו ' + r.will_write + ' שורות</b> מתוך ' + r.total + ' בבורד' +
-      (r.unmatched ? ' · ' + r.unmatched + ' בלי התאמה (ידולגו)' : '') +
-      (r.pending ? ' · ' + r.pending + ' עדיין בלי ציון (ידולגו)' : '') + '</div>' +
-      '<div style="overflow-x:auto;max-height:44vh;margin-top:10px"><table class="grid"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' +
-      '<div class="btn-row" style="margin-top:14px">' +
-      '<button class="btn big" id="mapi-push"' + (r.will_write ? '' : ' disabled') + '>שלח ' + r.will_write + ' שורות למאנדיי</button></div>' +
+      '<h3 style="margin:16px 0 6px;font-size:14px">1 · דורש טיפול</h3>' + todoHtml +
+      '<h3 style="margin:18px 0 6px;font-size:14px">2 · יישלחו (' + ready.length + ')</h3>' +
+      (ready.length
+        ? '<details><summary style="cursor:pointer;color:var(--accent)">הצג את הטבלה</summary>' +
+          '<div style="overflow-x:auto;max-height:40vh;margin-top:8px"><table class="grid"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></details>'
+        : '<div class="msg warn">אין עדיין שורות לשליחה.</div>') +
+      (pend.length ? '<p class="hint-text" style="margin:8px 0 0">' + pend.length + ' שורות הותאמו אבל עדיין בלי ציון — ידולגו.</p>' : '') +
+      (orphans.length
+        ? '<h3 style="margin:18px 0 6px;font-size:14px">3 · ⚠ נבדקו ואין להם שורה בבורד (' + orphans.length + ')</h3>' +
+          '<div class="msg warn">הציונים שלהם <b>לא יישלחו לשום מקום</b> — אין להם שורה בבורד. הוסיפו אותם למאנדיי, או שבצו אותם למעלה אם הם מופיעים שם בשם אחר.<br><br>' +
+          orphans.map(function (p) { return esc(p.name) + (p.day ? ' <span style="opacity:.6">· ' + esc(p.day) + '</span>' : ''); }).join(' · ') + '</div>'
+        : '') +
+      '<div class="btn-row" style="margin-top:16px">' +
+      '<button class="btn big" id="mapi-push"' + (ready.length ? '' : ' disabled') + '>שלח ' + ready.length + ' שורות למאנדיי</button></div>' +
       '<div id="mapi-result"></div>';
 
     box.querySelectorAll('.mapi-pick').forEach(function (s) {
-      s.onchange = function () {
-        var id = s.getAttribute('data-i');
-        if (s.value) MB.manual[id] = s.value; else delete MB.manual[id];
-        mapiPreview();   // מריצים שוב כדי לראות את הערכים שייכתבו
-      };
+      s.onchange = function () { mapiAssign(s.getAttribute('data-i'), s.value); };
+    });
+    box.querySelectorAll('.mapi-undo').forEach(function (b) {
+      b.onclick = function () { mapiAssign(b.getAttribute('data-i'), ''); };
     });
     var p = document.getElementById('mapi-push'); if (p) p.onclick = mapiPush;
   }
 
   async function mapiPush() {
-    var rows = MB.rows.filter(function (r) { return r.matched && !r.pending; })
-      .map(function (r) { return { item_id: r.item_id, key: r.matched.key, board_name: r.board_name }; });
-    if (!rows.length) return;
-    if (!confirm('לכתוב ' + rows.length + ' שורות לבורד «' + MB.board.name + '»?\n\nרק העמודות שמופו ייכתבו. שאר העמודות לא ישתנו.')) return;
+    var ready = MB.rows.filter(function (r) { return r.matched && !r.pending; });
+    var todo = MB.rows.filter(function (r) { return !r.matched; }).length;
+    var used = {}; MB.rows.forEach(function (r) { if (r.matched) used[r.matched.key] = 1; });
+    var orphans = MB.pool.filter(function (p) { return !used[p.key] && !p.pending; }).length;
+    if (!ready.length) return;
+    // אישור מדעת — עם המספרים מול העיניים, לא «אישור?» סתם.
+    var msg = 'לכתוב ' + ready.length + ' שורות לבורד «' + MB.board.name + '»?\n\n' +
+      'רק העמודות שמופו ייכתבו. שאר העמודות לא ישתנו.';
+    if (todo) msg += '\n\n⚠ ' + todo + ' שורות בבורד נשארו בלי טיפול ולא יקבלו ציון.';
+    if (orphans) msg += '\n⚠ ' + orphans + ' נבחנים שנבדקו אין להם שורה בבורד — הציון שלהם לא יישלח.';
+    if (!confirm(msg)) return;
+    var rows = ready.map(function (r) { return { item_id: r.item_id, key: r.matched.key, board_name: r.board_name }; });
     var out = document.getElementById('mapi-result');
     if (out) out.innerHTML = '<div class="msg info">שולח…</div>';
     try {
       var r = await call('/examiner/monday/push', 'POST',
-        { board_id: MB.board.id, mapping: MB.mapping, rows: rows });
+        { board_id: MB.board.id, mapping: MB.mapping, rows: rows, days: Object.keys(MB.days_sel) });
       var html = '<div class="msg ' + (r.failed.length ? 'warn' : 'ok') + '" style="margin-top:12px">' +
         '<b>נכתבו ' + r.written + ' שורות</b>' + (r.skipped ? ' · ' + r.skipped + ' דולגו' : '') +
         (r.failed.length ? ' · ' + r.failed.length + ' נכשלו' : '') + '</div>';

@@ -3334,14 +3334,44 @@ app.post('/api/examiner/grading/monday-file', authExaminer, (req, res) => {
 // ⚠ הטוקן לא מוחזר בשום תשובה. `has_token` בלבד.
 
 // כל השורות המנוקדות מכל המחזורים, לפי מפתח — בסיס להתאמה ולכתיבה.
-function mondayPool(cohortIds) {
-  let ids = Array.isArray(cohortIds) && cohortIds.length
-    ? Array.from(new Set(cohortIds.map(Number).filter(Boolean)))
-    : db.prepare('SELECT id FROM grading_cohorts ORDER BY id').all().map((c) => c.id);
+// ⚠ `days` הוא רשימת מזהי «<cohort_id>|<יום>». **בלי בחירה מחזיר ריק** ולא
+// «הכול» — משתמש ששולח למאנדיי בלי לבחור היה חושף נבחנים שטרם נבדקו.
+function mondayPool(days) {
+  const want = Array.isArray(days) ? new Set(days.map(String)) : null;
+  if (!want || !want.size) return [];
+  const ids = db.prepare('SELECT id FROM grading_cohorts ORDER BY id').all().map((c) => c.id);
   const pool = [];
-  for (const id of ids) buildSheetRows(id).forEach((r) => pool.push(Object.assign({ cohort_id: id, key: id + ':' + r.code }, r)));
+  for (const id of ids) {
+    buildSheetRows(id).forEach((r) => {
+      const dayKey = id + '|' + (r.day || '');
+      if (!want.has(dayKey)) return;
+      pool.push(Object.assign({ cohort_id: id, key: id + ':' + r.code, day_key: dayKey }, r));
+    });
+  }
   return pool;
 }
+
+// הימים שאפשר לשלוח, עם ספירת «נבדקו מתוך». מאותו מקור שמזין את השליחה
+// (`buildSheetRows`), כדי שלא יופיעו שני מספרים שונים לאותו יום.
+app.get('/api/examiner/monday/days', authExaminer, (req, res) => {
+  const out = [];
+  const cohorts = db.prepare('SELECT id, name FROM grading_cohorts ORDER BY id DESC').all();
+  for (const c of cohorts) {
+    const byDay = {};
+    buildSheetRows(c.id).forEach((r) => {
+      const d = r.day || '(ללא יום)';
+      if (!byDay[d]) byDay[d] = { total: 0, graded: 0 };
+      byDay[d].total++;
+      if (!r.pending) byDay[d].graded++;
+    });
+    Object.keys(byDay).forEach((d) => out.push({
+      day_key: c.id + '|' + (d === '(ללא יום)' ? '' : d),
+      cohort_id: c.id, cohort_name: c.name, day: d,
+      total: byDay[d].total, graded: byDay[d].graded, pending: byDay[d].total - byDay[d].graded,
+    }));
+  }
+  res.json({ ok: true, days: out });
+});
 const MONDAY_FIELDS = [
   { field: 'final', label: 'ציון' },
   { field: 'ravMelel', label: 'רב-מלל' },
@@ -3380,16 +3410,18 @@ app.get('/api/examiner/monday/board/:id', authExaminer, async (req, res) => {
 app.post('/api/examiner/monday/preview', authExaminer, async (req, res) => {
   const b = req.body || {};
   if (!b.board_id) return res.status(400).json({ error: 'לא נבחר בורד.' });
+  if (!Array.isArray(b.days) || !b.days.length) return res.status(400).json({ error: 'בחרו לפחות יום אחד לשליחה.' });
   try {
     const items = await monday.boardItems(b.board_id);
-    const pool = mondayPool(b.cohorts);
+    const pool = mondayPool(b.days);
+    if (!pool.length) return res.status(400).json({ error: 'לא נמצאו נבחנים בימים שנבחרו.' });
     const candidates = pool.map((r) => ({ code: r.key, name: r.name }));
     const byKey = {}; pool.forEach((r) => { byKey[r.key] = r; });
-    const manual = b.manual || {};    // { item_id: key } — הכרעות ידניות של המשתמש
+    const vals = (r) => ({ final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english,
+      recommendation: String(r.recommendation || '').replace(/[\t\r\n]+/g, ' ').trim() });
 
     const rows = items.map((it) => {
-      const forced = manual[it.id];
-      const m = forced ? { exact: { code: forced } } : nameMatch.matchName(it.name, candidates);
+      const m = nameMatch.matchName(it.name, candidates);
       const r = m.exact ? byKey[m.exact.code] : null;
       const out = {
         item_id: it.id, board_name: it.name,
@@ -3398,17 +3430,17 @@ app.post('/api/examiner/monday/preview', authExaminer, async (req, res) => {
           key: s.code, name: (byKey[s.code] || {}).name, day: (byKey[s.code] || {}).day || '',
           reason: s.reason, confidence: s.confidence,
         })),
-        pending: !!(r && r.pending), values: {},
+        pending: !!(r && r.pending), values: r && !r.pending ? vals(r) : {},
       };
-      if (r && !r.pending) {
-        out.values = { final: r.final, ravMelel: r.ravMelel, quant: r.quant, english: r.english,
-          recommendation: String(r.recommendation || '').replace(/[\t\r\n]+/g, ' ').trim() };
-      }
       return out;
     });
-    const willWrite = rows.filter((r) => r.matched && !r.pending).length;
+    // ★ הפול המלא חוזר ללקוח כדי ששיבוץ ידני ייפתר **בזיכרון** ולא בקריאה
+    // חוזרת לשרת. בלי זה כל שיבוץ מושך את כל הבורד מחדש.
     res.json({ ok: true, fields: MONDAY_FIELDS, rows: rows,
-      total: rows.length, will_write: willWrite,
+      pool: pool.map((r) => ({ key: r.key, name: r.name, day: r.day || '', code: r.code,
+        pending: !!r.pending, values: r.pending ? {} : vals(r) })),
+      total: rows.length,
+      will_write: rows.filter((r) => r.matched && !r.pending).length,
       unmatched: rows.filter((r) => !r.matched).length,
       pending: rows.filter((r) => r.pending).length });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -3431,7 +3463,10 @@ app.post('/api/examiner/monday/push', authExaminer, async (req, res) => {
     info.columns.forEach((c) => { colTypes[c.id] = c.type; });
   } catch (e) { return res.status(400).json({ error: e.message }); }
 
-  const pool = mondayPool(b.cohorts);
+  // ⚠ אותה הגבלת ימים כמו בתצוגה המקדימה. מפתח מיום שלא נבחר לא יימצא בפול
+  // ולכן פשוט ידולג — הגנה מפני שליחה של נבחנים שהמשתמש לא התכוון אליהם.
+  if (!Array.isArray(b.days) || !b.days.length) return res.status(400).json({ error: 'בחרו לפחות יום אחד לשליחה.' });
+  const pool = mondayPool(b.days);
   const byKey = {}; pool.forEach((r) => { byKey[r.key] = r; });
 
   const results = { written: 0, skipped: 0, failed: [] };
